@@ -1,0 +1,96 @@
+name: Android APK Release
+
+# Al subir un tag app-vX.Y.Z se compila la app, se corren los tests y se publica el APK
+# en el release de ese tag (se crea si no existe). Manual: Actions > Run workflow (no publica, solo compila).
+on:
+  push:
+    tags:
+      - "app-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/libs.versions.toml', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      # La firma tiene que ser siempre la misma: si cambia, el celular no deja actualizar encima.
+      # La clave (la debug de la PC del dueño) vive en el secreto ANDROID_KEYSTORE_BASE64.
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::Falta el secreto ANDROID_KEYSTORE_BASE64 (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+          mkdir -p ~/.android
+          echo "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+
+      - name: Unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Build APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Name the APK
+        id: apk
+        run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          cp app/build/outputs/apk/debug/app-debug.apk "stc1000-app-${VERSION}.apk"
+          sha256sum "stc1000-app-${VERSION}.apk" | tee "stc1000-app-${VERSION}.apk.sha256"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/app-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.apk.outputs.version }}
+        run: |
+          FILES="stc1000-app-${VERSION}.apk stc1000-app-${VERSION}.apk.sha256"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --clobber
+          else
+            gh release create "$TAG" $FILES --title "App Android ${VERSION}" \
+              --notes "APK de la app Android. Descargar el .apk, abrirlo en el celular y permitir 'instalar apps de origen desconocido'. Se instala encima de la versión anterior sin perder la configuración."
+          fi
+
+      - name: Keep APK as artifact (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stc1000-apk
+          path: android/stc1000-app-*.apk
