@@ -1,13 +1,16 @@
 package com.marti.stc1000.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,9 +18,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -33,8 +41,8 @@ import kotlin.math.abs
 private const val GAP_SEC = 900L
 
 /**
- * Gráfico de línea hecho a mano con Canvas: sin dependencias, con huecos reales y selección táctil.
- * El eje X cubre [startSec, endSec]; el eje Y se ajusta al rango de los datos.
+ * Gráfico de línea con área degradada, hecho con Canvas (sin dependencias), con huecos reales
+ * y selección táctil. El eje X cubre [startSec, endSec]; el eje Y se ajusta al rango de los datos.
  */
 @Composable
 fun TemperatureChart(
@@ -47,24 +55,37 @@ fun TemperatureChart(
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val markerColor = MaterialTheme.colorScheme.tertiary
+    val surface = MaterialTheme.colorScheme.surfaceContainerLow
     val measurer = rememberTextMeasurer()
     val labelStyle = TextStyle(color = labelColor, fontSize = 11.sp)
 
     var selected by remember(samples) { mutableStateOf<Sample?>(null) }
 
     Column(modifier) {
-        Text(
-            text = selected?.let { "${Format.dayHour(it.ts)}  ·  ${Format.temp(it.temp)}" }
-                ?: "Tocá el gráfico para ver el valor",
-            style = MaterialTheme.typography.labelLarge,
-            color = labelColor,
-        )
+        // Lectura de la muestra seleccionada (o ayuda), con altura fija para que no salte el layout.
+        Box(Modifier.height(32.dp), contentAlignment = Alignment.CenterStart) {
+            val s = selected
+            if (s != null) {
+                Text(
+                    "${Format.dayHour(s.ts)}  ·  ${Format.temp(s.temp)}",
+                    Modifier
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(50))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            } else if (samples.isNotEmpty()) {
+                Text("Tocá o arrastrá para ver cada lectura", style = MaterialTheme.typography.bodySmall, color = labelColor)
+            }
+        }
         if (samples.isEmpty()) {
-            Text(
-                "Todavía no hay datos en este período.",
-                modifier = Modifier.padding(top = 24.dp),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    "Todavía no hay datos en este período.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = labelColor,
+                )
+            }
             return@Column
         }
 
@@ -108,11 +129,12 @@ fun TemperatureChart(
             fun xOf(ts: Long) = left + ((ts - startSec) / xSpan).toFloat().coerceIn(0f, 1f) * plotW
             fun yOf(v: Double) = top + (1f - ((v - yMin) / (yMax - yMin)).toFloat()) * plotH
 
-            // Grilla horizontal + etiquetas de temperatura.
+            // Grilla punteada + etiquetas de temperatura.
+            val dash = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 6.dp.toPx()))
             for (i in 0..3) {
                 val v = yMin + (yMax - yMin) * i / 3
                 val y = yOf(v)
-                drawLine(gridColor, Offset(left, y), Offset(size.width - right, y), strokeWidth = 1f)
+                drawLine(gridColor, Offset(left, y), Offset(size.width - right, y), strokeWidth = 1f, pathEffect = dash)
                 val label = measurer.measure(String.format(java.util.Locale.US, "%.1f", v).replace('.', ','), labelStyle)
                 drawText(label, topLeft = Offset(left - label.size.width - 6.dp.toPx(), y - label.size.height / 2f))
             }
@@ -126,29 +148,45 @@ fun TemperatureChart(
                 drawText(label, topLeft = Offset(x, size.height - label.size.height))
             }
 
-            // Línea, cortada donde hay huecos.
-            val path = Path()
-            var prev: Sample? = null
+            // Segmentos continuos (cortados donde hay huecos): área degradada + línea.
+            val segments = ArrayList<MutableList<Sample>>()
             for (s in samples) {
-                val x = xOf(s.ts)
-                val y = yOf(s.temp)
-                if (prev == null || s.ts - prev.ts > GAP_SEC) path.moveTo(x, y) else path.lineTo(x, y)
-                prev = s
+                val last = segments.lastOrNull()?.lastOrNull()
+                if (last == null || s.ts - last.ts > GAP_SEC) segments.add(mutableListOf(s)) else segments.last().add(s)
             }
-            drawPath(path, lineColor, style = Stroke(width = 2.5.dp.toPx()))
-            // Puntos aislados (una lectura entre dos huecos) no se verían como línea.
-            samples.forEachIndexed { i, s ->
-                val before = samples.getOrNull(i - 1)
-                val after = samples.getOrNull(i + 1)
-                val isolated = (before == null || s.ts - before.ts > GAP_SEC) &&
-                    (after == null || after.ts - s.ts > GAP_SEC)
-                if (isolated) drawCircle(lineColor, 3.dp.toPx(), Offset(xOf(s.ts), yOf(s.temp)))
+            val baseY = top + plotH
+            val fill = Brush.verticalGradient(
+                colors = listOf(lineColor.copy(alpha = 0.28f), lineColor.copy(alpha = 0f)),
+                startY = top,
+                endY = baseY,
+            )
+            for (seg in segments) {
+                if (seg.size < 2) {
+                    drawCircle(lineColor, 3.5.dp.toPx(), Offset(xOf(seg[0].ts), yOf(seg[0].temp)))
+                    continue
+                }
+                val line = Path()
+                seg.forEachIndexed { i, s ->
+                    val x = xOf(s.ts)
+                    val y = yOf(s.temp)
+                    if (i == 0) line.moveTo(x, y) else line.lineTo(x, y)
+                }
+                val area = Path().apply {
+                    addPath(line)
+                    lineTo(xOf(seg.last().ts), baseY)
+                    lineTo(xOf(seg.first().ts), baseY)
+                    close()
+                }
+                drawPath(area, fill)
+                drawPath(line, lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
 
             selected?.let { s ->
                 val x = xOf(s.ts)
-                drawLine(markerColor, Offset(x, top), Offset(x, top + plotH), strokeWidth = 1.dp.toPx())
-                drawCircle(markerColor, 5.dp.toPx(), Offset(x, yOf(s.temp)))
+                val y = yOf(s.temp)
+                drawLine(markerColor.copy(alpha = 0.5f), Offset(x, top), Offset(x, baseY), strokeWidth = 1.dp.toPx())
+                drawCircle(surface, 7.dp.toPx(), Offset(x, y))
+                drawCircle(markerColor, 5.dp.toPx(), Offset(x, y))
             }
         }
     }

@@ -57,89 +57,109 @@ fun SettingsScreen(
     Column(
         modifier
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Conexión al server MQTT", style = MaterialTheme.typography.titleLarge)
-        Text(
-            "Para ver los datos fuera de casa, activá Tailscale en el celular y usá como servidor la IP " +
-                "de Tailscale del server (100.x.y.z). En casa también sirve la IP de la red local.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = form.host,
-            onValueChange = { v -> change { form = form.copy(host = v) } },
-            label = { Text("Servidor (IP o nombre)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = portText,
-            onValueChange = { v -> change { portText = v.filter(Char::isDigit).take(5) } },
-            label = { Text("Puerto") },
-            singleLine = true,
-            isError = !portOk,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Usar TLS")
-                Text(
-                    "Conexión cifrada (normalmente puerto 8883). Necesita un certificado válido en el broker.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        ScreenHeader("Ajustes", "Conexión al server MQTT")
+
+        SurfaceCard {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Servidor", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = form.host,
+                    onValueChange = { v -> change { form = form.copy(host = v) } },
+                    label = { Text("Dirección (nombre o IP)") },
+                    supportingText = { Text("Ej.: mi-server.tu-red.ts.net, o una IP de la red local") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = portText,
+                    onValueChange = { v -> change { portText = v.filter(Char::isDigit).take(5) } },
+                    label = { Text("Puerto") },
+                    singleLine = true,
+                    isError = !portOk,
+                    shape = MaterialTheme.shapes.medium,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Conexión cifrada (TLS)", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Necesaria si el server está publicado en internet. Requiere un certificado válido.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = form.tls,
+                        onCheckedChange = { on ->
+                            change {
+                                form = form.copy(tls = on)
+                                if (on && portText == "1883") portText = "8883"
+                                if (!on && portText == "8883") portText = "1883"
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        SurfaceCard {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Acceso", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = form.username,
+                    onValueChange = { v -> change { form = form.copy(username = v) } },
+                    label = { Text("Usuario") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = form.password,
+                    onValueChange = { v -> change { form = form.copy(password = v) } },
+                    label = { Text("Contraseña") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        TextButton(onClick = { showPassword = !showPassword }) { Text(if (showPassword) "Ocultar" else "Ver") }
+                    },
+                    supportingText = { Text("Se guarda cifrada con el Keystore de Android.") },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Switch(
-                checked = form.tls,
-                onCheckedChange = { on ->
-                    change {
-                        form = form.copy(tls = on)
-                        if (on && portText == "1883") portText = "8883"
-                        if (!on && portText == "8883") portText = "1883"
-                    }
-                },
-            )
         }
-        OutlinedTextField(
-            value = form.username,
-            onValueChange = { v -> change { form = form.copy(username = v) } },
-            label = { Text("Usuario") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = form.password,
-            onValueChange = { v -> change { form = form.copy(password = v) } },
-            label = { Text("Contraseña") },
-            singleLine = true,
-            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            trailingIcon = {
-                TextButton(onClick = { showPassword = !showPassword }) { Text(if (showPassword) "Ocultar" else "Ver") }
-            },
-            supportingText = { Text("Se guarda cifrada con el Keystore de Android.") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = form.prefix,
-            onValueChange = { v -> change { form = form.copy(prefix = v) } },
-            label = { Text("Prefijo de tópicos") },
-            singleLine = true,
-            isError = form.prefix.isBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        )
+
+        SurfaceCard {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Tópicos", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = form.prefix,
+                    onValueChange = { v -> change { form = form.copy(prefix = v) } },
+                    label = { Text("Prefijo") },
+                    supportingText = { Text("Tiene que ser el mismo que usa el firmware (por defecto stc1000).") },
+                    singleLine = true,
+                    isError = form.prefix.isBlank(),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
 
         when (test) {
             TestState.Idle -> {}
-            TestState.Running -> Text("Probando conexión…")
-            is TestState.Done -> Text(
-                test.message,
-                color = if (test.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-            )
+            TestState.Running -> StatusMessage("Probando conexión…", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+            is TestState.Done -> if (test.ok) {
+                StatusMessage(test.message, MaterialTheme.status.okContainer, MaterialTheme.colorScheme.onSurface)
+            } else {
+                StatusMessage(test.message, MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+            }
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -158,7 +178,21 @@ fun SettingsScreen(
             ) { Text("Guardar") }
         }
         if (saved) {
-            Text("Guardado. La app conecta sola cada vez que la abrís.", color = MaterialTheme.colorScheme.primary)
+            Text(
+                "Guardado. La app conecta sola cada vez que la abrís.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.status.ok,
+            )
         }
+    }
+}
+
+@Composable
+private fun StatusMessage(text: String, container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color) {
+    androidx.compose.material3.Card(
+        shape = MaterialTheme.shapes.medium,
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = container, contentColor = content),
+    ) {
+        Text(text, Modifier.fillMaxWidth().padding(16.dp), style = MaterialTheme.typography.bodyMedium)
     }
 }
