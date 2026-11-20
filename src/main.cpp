@@ -462,7 +462,8 @@ static bool mqttConTls() { return cfg.mqttPort == 8883 || cfg.mqttPort == 8443; 
 String       clientId;
 String       tEstado, tTemp, tDisplay, tInfo, tFirmware, tHist, tOta, tComando;
 
-uint32_t tWifiPerdido = 0;        // desde cuando no hay WiFi (0 = conectado)
+bool     sinWifi = true;          // no hay WiFi (al arrancar todavia no conecto)
+uint32_t tWifiPerdido = 0;        // desde cuando no hay WiFi
 uint32_t tProxMqtt = 0;           // proximo intento de conexion MQTT
 uint32_t esperaMqtt = 2000;       // backoff exponencial, hasta 60 s
 uint32_t reconexionesWifi = 0, reconexionesMqtt = 0;
@@ -778,8 +779,11 @@ static void procesarComandoMqtt() {
 
 static void mantenerRed() {
   if (WiFi.status() != WL_CONNECTED) {
-    if (tWifiPerdido == 0) {
-      tWifiPerdido = millis() | 1;
+    if (!sinWifi) {
+      // antes era millis() | 1, que podia quedar 1 ms en el futuro: la resta de abajo
+      // daba un numero enorme y reiniciaba al toque (y contaba como arranque fallido)
+      sinWifi = true;
+      tWifiPerdido = millis();
       Serial.println("WiFi: desconectado");
     }
     // setAutoReconnect se encarga; si en 10 min no vuelve, reinicio completo
@@ -790,8 +794,8 @@ static void mantenerRed() {
     }
     return;
   }
-  if (tWifiPerdido != 0) {
-    tWifiPerdido = 0;
+  if (sinWifi) {
+    sinWifi = false;
     reconexionesWifi++;
     Serial.printf("WiFi: conectado, IP %s, RSSI %d dBm\n",
                   WiFi.localIP().toString().c_str(), WiFi.RSSI());
@@ -954,7 +958,7 @@ void setup() {
   WiFi.setSleep(false);
   if (cfg.ssid.length()) WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
   WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
-  tWifiPerdido = millis() | 1;
+  tWifiPerdido = millis();
 
   // Hora por NTP (UTC): para el historial
   configTime(0, 0, "pool.ntp.org", "time.google.com");
