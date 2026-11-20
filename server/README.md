@@ -5,9 +5,11 @@ El ESP32 publica ahí la temperatura y la app Android la lee.
 
 | Desde dónde | Host | Puerto | Cifrado |
 |---|---|---|---|
-| Internet (ESP32, o el celular sin Tailscale) | `SERVIDOR.TU-TAILNET.ts.net` | 8443 | TLS (Let's Encrypt, vía Tailscale Funnel) |
-| Celular con Tailscale | `100.x.y.z` | 1883 | El túnel de Tailscale |
-| LAN de casa | `IP_LAN_DEL_SERVER` | 1883 | Ninguno |
+| LAN de casa (ESP32, y el celular en el WiFi de casa) | `IP_LAN_DEL_SERVER` (fija) | 1883 | Ninguno (solo red local) |
+| Celular fuera de casa, con Tailscale | `100.x.y.z` | 1883 | El túnel de Tailscale |
+
+El broker **no** está publicado en internet: no hay puertos abiertos en el router ni Tailscale Funnel.
+El ESP32 solo habla por la LAN.
 
 Las contraseñas **no** están en este repo. Están en `C:\Users\marti\server-debian\mqtt-credenciales.txt`
 (en esta PC) y en `include/secrets.h` (ignorado por git).
@@ -24,9 +26,9 @@ Las contraseñas **no** están en este repo. Están en `C:\Users\marti\server-de
   - La configuración anterior (`local.conf` y el usuario viejo `esp32`) quedó respaldada en
     `/etc/mosquitto/backup-20261120-000735/`.
 - **Tailscale 1.104.6** (repo oficial pkgs.tailscale.com), habilitado en systemd. Nodo `debian`, IP `100.x.y.z`.
-  - **Funnel**: publica el broker en internet en `SERVIDOR.TU-TAILNET.ts.net:8443`. Tailscale
-    termina el TLS y reenvía a `localhost:1883`. La config de Funnel queda guardada en tailscaled
-    y se restablece sola al reiniciar. Ver con `tailscale funnel status`.
+  - Sirve para que el celular llegue al broker desde afuera de casa. En el celular: app Tailscale
+    con la misma cuenta.
+  - Funnel/Serve **apagados** (`tailscale funnel status` → "No serve config").
   - No se abrió ningún puerto en el router.
 
 ### Usuarios y permisos
@@ -42,8 +44,7 @@ No se permite el acceso anónimo. Todo lo que no esté en la ACL está prohibido
 
 En el server no hay ufw. El servicio `nftables` está inactivo y la cadena INPUT acepta todo; las
 únicas reglas son las de Docker y Tailscale. El puerto 1883 solo se ve desde la LAN y desde
-Tailscale porque el router no lo reenvía. Desde internet solo se llega por Funnel (8443, con TLS y
-usuario/clave).
+Tailscale porque el router no lo reenvía. Desde internet no se llega.
 
 ## Agregar o cambiar usuarios
 
@@ -76,7 +77,7 @@ Es una contradicción conocida de Mosquitto 2.0: hay que dejar `mosquitto:mosqui
 ```bash
 sudo journalctl -u mosquitto -f            # arranques y paradas del servicio
 sudo tail -f /var/log/mosquitto/mosquitto.log   # conexiones, errores de login, etc.
-tailscale funnel status                     # que el Funnel siga activo
+tailscale status                            # que Tailscale siga conectado
 ```
 
 ## Probar con mosquitto_sub / mosquitto_pub
@@ -93,15 +94,15 @@ mosquitto_pub -h localhost -u celular -P 'CLAVE_CELULAR' -t stc1000/comando -m '
 # Probar un permiso: con -V 5 -q 1 el broker contesta "Not authorized" si no está permitido
 mosquitto_pub -h localhost -u celular -P 'CLAVE_CELULAR' -V 5 -q 1 -d -t stc1000/temperatura -m 99
 
-# Desde internet, por el Funnel (TLS)
-mosquitto_sub -h SERVIDOR.TU-TAILNET.ts.net -p 8443 --capath /etc/ssl/certs \
-  -u celular -P 'CLAVE_CELULAR' -t 'stc1000/#' -v
+# Desde otra máquina de la LAN o de Tailscale
+mosquitto_sub -h IP_LAN_DEL_SERVER -u celular -P 'CLAVE_CELULAR' -t 'stc1000/#' -v
 ```
 
 ## Mantenimiento
 
 - **Vencimiento de la clave de Tailscale**: en https://login.tailscale.com/admin/machines, en el
   nodo `debian`, elegí "Disable key expiry". Si no, el nodo se desloguea solo cuando vence la clave
-  y se caen Funnel y Tailscale.
-- **IP de LAN**: conviene reservar `IP_LAN_DEL_SERVER` para el server en el DHCP del router. El ESP32
-  entra por el nombre de Funnel, así que no depende de esa IP, pero los accesos por LAN sí.
+  y el celular deja de llegar desde afuera.
+- **IP de LAN fija**: el ESP32 tiene la IP del server grabada (`MQTT_HOST`). Hay que reservarla
+  para el server en el DHCP del router (por la MAC de su WiFi). Si alguna vez cambia, se corrige
+  en el ESP32 por el monitor serie con `set mqtt_host NUEVA_IP`.

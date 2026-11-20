@@ -71,7 +71,10 @@ Pendiente:
   - `m`: muestra la matriz de pares activos en %.
   - `r`: hace una captura cruda de cambios H/L/Z con tiempo en µs.
 - Avisa cuando aparece un "par desconocido activo", para descubrir lo que falta del mapa.
-- **No se compiló ni se probó en hardware.**
+- Probado en hardware el 2026-11-20: lee bien "LLL" y temperaturas de 26 a 27 °C. El firmware
+  actual (`src/main.cpp`) agregó MQTT, historial y OTA. **Lo que sigue y lo que se midió después
+  (FMD a 5 V en el aparato armado) está en `docs/ESTADO.md`**; las secciones de abajo son el
+  relevamiento original.
 
 ## Riesgos y dudas abiertas
 - No se sabe si el FMD arranca con 3,3 V. Si no arranca, hay que alimentarlo a 5 V y rediseñar la lectura, porque el ESP32-C3 no tolera 5 V.

@@ -70,9 +70,14 @@ caja cerrada, alimentado aparte, y **nunca** conectado por USB a una PC mientras
 termostato esté enchufado. El FMD tiene que trabajar a 3,3 V: el ESP32-C3 no tolera
 los 5 V de la fuente original. Más detalles en `docs/`.
 
-## Broker por internet (Tailscale Funnel)
+## Red
 
-Si `MQTT_PORT` es 8443 u 8883, el ESP32 se conecta con **TLS** y valida el certificado
-contra las raíces de Let's Encrypt (`include/ca_letsencrypt.h`). Para eso necesita la hora
-(NTP), así que la primera conexión espera unos segundos. Con cualquier otro puerto
-(ej. 1883 en la LAN) se conecta sin cifrar. Configuración del server en `server/`.
+El ESP32 publica al Mosquitto del server **por la LAN** (puerto 1883). El celular llega desde
+afuera de casa con **Tailscale**. No hay puertos abiertos en el router. Configuración del server
+en `server/`.
+
+El firmware también soporta MQTT con **TLS**: si `MQTT_PORT` es 8443 u 8883, valida el certificado
+contra las raíces de Let's Encrypt (`include/ca_letsencrypt.h`), después de tomar la hora por NTP.
+Hoy no se usa (se probó para Tailscale Funnel y se descartó).
+
+Estado del proyecto y pendientes: [`docs/ESTADO.md`](docs/ESTADO.md).
