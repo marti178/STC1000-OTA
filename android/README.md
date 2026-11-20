@@ -5,10 +5,10 @@ App nativa (Kotlin + Jetpack Compose + Material 3) que muestra la temperatura de
 ## Cómo funciona
 
 - La app se conecta al Mosquitto de tu server casero (puerto 1883, o 8883 con TLS) con usuario y clave.
-- Fuera de casa: activá **Tailscale** en el celular y usá la IP de Tailscale del server (`100.x.y.z`). No hace falta abrir puertos en el router.
-- Está conectada **mientras la app está abierta** (30 s de gracia al salir). Reconecta sola con espera creciente (2, 4, 8… hasta 60 s) y reacciona a cambios de red (Wi-Fi ↔ datos, Tailscale on/off).
+- Desde cualquier lado, sin Tailscale en el celular: el server publica el broker por **Tailscale Funnel** (TLS, puerto 8443). Ver `server/README.md`. También se puede usar la IP de la LAN o la de Tailscale.
+- Está conectada **mientras la app está abierta** (30 s de gracia al salir). Reconecta sola con espera creciente (2, 4, 8… hasta 60 s) y reacciona a cambios de red (Wi-Fi ↔ datos).
 - Cada lectura en vivo y cada `historial` recibido se guardan en una base local (Room), deduplicando por timestamp redondeado al paso (`paso_s`). Se conservan 90 días.
-- Cada ~3 h, con red, un trabajo en segundo plano (WorkManager) conecta un momento, lee el `historial` retenido y lo guarda. Así hay datos de varios días aunque abras la app una vez por día. Si Tailscale está apagado en ese momento, simplemente espera a la próxima.
+- **El historial largo lo guarda y publica el server**, no el celular: un servicio en el Debian anota cada muestra y publica retenido `<prefijo>/historial_largo` (hasta 30 días, mismo formato que `historial`). Al abrir la app llega al instante, aunque no la hayas abierto en días. La app no hace nada en segundo plano.
 - La contraseña se guarda cifrada con AES/GCM, con una clave del Android Keystore.
 
 ## Abrir el proyecto en Android Studio
@@ -40,8 +40,8 @@ La primera vez la app abre en **Ajustes**:
 
 | Campo | Qué poner |
 |---|---|
-| Servidor | IP de Tailscale del server (`100.x.y.z`), o su IP en la LAN (`192.168.x.x`) |
-| Puerto | `1883` (sin TLS) o `8883` (con TLS) |
+| Servidor | el nombre público del Funnel (`debian.tailc89921.ts.net`), o la IP de la LAN (`192.168.x.x`) |
+| Puerto | `8443` (Funnel, con TLS) o `1883` (LAN, sin TLS) |
 | Usuario / Contraseña | los del Mosquitto (`password_file`) |
 | Prefijo | `stc1000` (el mismo que el firmware) |
 | Usar TLS | solo si Mosquitto tiene un certificado válido (no sirve un autofirmado) |
@@ -66,7 +66,6 @@ android/
     data/    Room (Sample, AppDatabase), SettingsStore (DataStore), SecretBox (Keystore AES/GCM)
     domain/  History(Parser), Samples (redondeo/fusión), Stats, Period, Format  <- lógica pura, con tests
     mqtt/    MqttRepository (conexión mantenida), MqttSupport (cliente HiveMQ, errores), NetworkWatcher
-    work/    HistorySyncWorker
     ui/      MainViewModel, HomeScreen, DeviceScreen, SettingsScreen, TemperatureChart, Theme
   app/src/test/...                 tests unitarios (parseo, fusión/dedupe, estadísticas, formatos)
 ```

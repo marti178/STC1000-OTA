@@ -14,8 +14,8 @@ android {
         applicationId = "com.marti.stc1000"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.1.4"
+        versionCode = 7
+        versionName = "1.2.0"
     }
 
     signingConfigs {
@@ -89,7 +89,6 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.hivemq.mqtt.client)
 

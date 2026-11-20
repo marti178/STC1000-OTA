@@ -114,7 +114,10 @@ class MqttRepository(context: Context) {
 
     private suspend fun runConnection(s: ConnSettings) {
         var attempt = 0
-        val topics = listOf("estado", "temperatura", "display", "firmware", "info", "historial", "ota")
+        // historial = últimas 24 h (lo publica el ESP32); historial_largo = hasta 30 días (lo publica el server).
+        val topics = listOf(
+            "estado", "temperatura", "display", "firmware", "info", "historial", "historial_largo", "ota",
+        )
         while (true) {
             if (!net.online.value) {
                 _connection.value = ConnectionState.WaitingNetwork
@@ -198,10 +201,12 @@ class MqttRepository(context: Context) {
             "firmware" -> _device.update { it.copy(firmware = text.trim()) }
             "info" -> DeviceInfo.parse(text)?.let { i -> _device.update { it.copy(info = i) } }
             "ota" -> _device.update { it.copy(ota = text.trim()) }
-            "historial" -> HistoryParser.parse(text)?.let { h ->
+            // El historial largo puede pesar decenas de KB: se parsea y guarda fuera del hilo de red.
+            "historial", "historial_largo" -> scope.launch {
+                val h = HistoryParser.parse(text) ?: return@launch
                 stepSec = h.stepSec
                 val samples = Samples.fromHistory(h, now)
-                if (samples.isNotEmpty()) scope.launch { dao.upsertAll(samples) }
+                if (samples.isNotEmpty()) dao.upsertAll(samples)
             }
         }
     }

@@ -5,18 +5,11 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import com.marti.stc1000.data.AppDatabase
 import com.marti.stc1000.data.SettingsStore
 import com.marti.stc1000.mqtt.MqttRepository
-import com.marti.stc1000.work.HistorySyncWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
 
 class Stc1000App : Application() {
     lateinit var repository: MqttRepository
@@ -35,19 +28,10 @@ class Stc1000App : Application() {
             override fun onStop(owner: LifecycleOwner) = repository.stop()
         })
 
-        scheduleHistorySync()
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
             // Se conservan 90 días de muestras.
             val cutoff = System.currentTimeMillis() / 1000 - 90L * 24 * 3600
             AppDatabase.get(this@Stc1000App).samples().deleteOlderThan(cutoff)
         }
-    }
-
-    private fun scheduleHistorySync() {
-        val request = PeriodicWorkRequestBuilder<HistorySyncWorker>(3, TimeUnit.HOURS)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .build()
-        WorkManager.getInstance(this)
-            .enqueueUniquePeriodicWork(HistorySyncWorker.NAME, ExistingPeriodicWorkPolicy.KEEP, request)
     }
 }
