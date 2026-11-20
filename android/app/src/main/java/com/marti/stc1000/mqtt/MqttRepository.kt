@@ -4,7 +4,7 @@ import android.content.Context
 import com.hivemq.client.mqtt.MqttGlobalPublishFilter
 import com.hivemq.client.mqtt.datatypes.MqttQos
 import com.hivemq.client.mqtt.mqtt3.Mqtt3AsyncClient
-import com.marti.stc1000.data.AppDatabase
+import com.marti.stc1000.data.Sample
 import com.marti.stc1000.data.ConnSettings
 import com.marti.stc1000.data.SettingsStore
 import com.marti.stc1000.domain.HistoryParser
@@ -37,7 +37,6 @@ import kotlin.random.Random
 class MqttRepository(context: Context) {
     private val appContext = context.applicationContext
     private val settingsStore = SettingsStore(appContext)
-    private val dao = AppDatabase.get(appContext).samples()
     private val net = NetworkWatcher(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -46,6 +45,20 @@ class MqttRepository(context: Context) {
 
     private val _device = MutableStateFlow(DeviceState())
     val device: StateFlow<DeviceState> = _device
+
+    /**
+     * Lecturas en memoria, solo para dibujar. La app NO guarda nada en el celular: el historial largo
+     * lo guarda el server y se vuelve a bajar (retenido) cada vez que se conecta.
+     */
+    private val _samples = MutableStateFlow<List<Sample>>(emptyList())
+    val samples: StateFlow<List<Sample>> = _samples
+
+    private fun addSamples(incoming: List<Sample>, nowSec: Long) {
+        _samples.update { cur ->
+            val cutoff = nowSec - RETAIN_SEC
+            Samples.mergeLatestWins(cur, incoming).filter { it.ts >= cutoff }
+        }
+    }
 
     private var supervisor: Job? = null
     private var stopJob: Job? = null
@@ -194,7 +207,7 @@ class MqttRepository(context: Context) {
                 }
                 // Un mensaje retenido no dice cuándo se midió: solo se guarda lo recibido en vivo.
                 if (!retained) {
-                    Samples.fromLive(v, now, stepSec)?.let { scope.launch { dao.upsertAll(listOf(it)) } }
+                    Samples.fromLive(v, now, stepSec)?.let { addSamples(listOf(it), now) }
                 }
             }
             "display" -> _device.update { it.copy(display = text.trim()) }
@@ -206,12 +219,15 @@ class MqttRepository(context: Context) {
                 val h = HistoryParser.parse(text) ?: return@launch
                 stepSec = h.stepSec
                 val samples = Samples.fromHistory(h, now)
-                if (samples.isNotEmpty()) dao.upsertAll(samples)
+                if (samples.isNotEmpty()) addSamples(samples, now)
             }
         }
     }
 
     companion object {
+        /** Cuánto se mantiene en memoria (el server publica 30 días). */
+        private const val RETAIN_SEC = 31L * 24 * 3600
+
         /** 2, 4, 8, 16, 32, 60, 60... segundos, con hasta 1 s de azar para no sincronizar reintentos. */
         fun backoffSeconds(attempt: Int): Int {
             val base = minOf(60L, 1L shl attempt.coerceIn(1, 6))

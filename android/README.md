@@ -7,7 +7,7 @@ App nativa (Kotlin + Jetpack Compose + Material 3) que muestra la temperatura de
 - La app se conecta al Mosquitto de tu server casero (puerto 1883, o 8883 con TLS) con usuario y clave.
 - Desde cualquier lado, sin Tailscale en el celular: el server publica el broker por **Tailscale Funnel** (TLS, puerto 8443). Ver `server/README.md`. También se puede usar la IP de la LAN o la de Tailscale.
 - Está conectada **mientras la app está abierta** (30 s de gracia al salir). Reconecta sola con espera creciente (2, 4, 8… hasta 60 s) y reacciona a cambios de red (Wi-Fi ↔ datos).
-- Cada lectura en vivo y cada `historial` recibido se guardan en una base local (Room), deduplicando por timestamp redondeado al paso (`paso_s`). Se conservan 90 días.
+- **La app no guarda lecturas en el celular.** Cada vez que conecta baja el historial largo del server (retenido) y lo mantiene solo en memoria para dibujar; las lecturas en vivo se suman encima. Si cerrás la app, al abrirla vuelve a bajar todo.
 - **El historial largo lo guarda y publica el server**, no el celular: un servicio en el Debian anota cada muestra y publica retenido `<prefijo>/historial_largo` (hasta 30 días, mismo formato que `historial`). Al abrir la app llega al instante, aunque no la hayas abierto en días. La app no hace nada en segundo plano.
 - La contraseña se guarda cifrada con AES/GCM, con una clave del Android Keystore.
 
@@ -63,7 +63,7 @@ android/
   gradle/libs.versions.toml        catálogo de versiones
   app/src/main/java/com/marti/stc1000/
     Stc1000App.kt, MainActivity.kt
-    data/    Room (Sample, AppDatabase), SettingsStore (DataStore), SecretBox (Keystore AES/GCM)
+    data/    Sample, SettingsStore (DataStore), SecretBox (Keystore AES/GCM)
     domain/  History(Parser), Samples (redondeo/fusión), Stats, Period, Format  <- lógica pura, con tests
     mqtt/    MqttRepository (conexión mantenida), MqttSupport (cliente HiveMQ, errores), NetworkWatcher
     ui/      MainViewModel, HomeScreen, DeviceScreen, SettingsScreen, TemperatureChart, Theme
@@ -72,7 +72,7 @@ android/
 
 ## Notas y límites
 
-- Una lectura **retenida** (la que llega al conectar) se muestra pero no se guarda como muestra, porque no dice cuándo se midió; el historial real viene del tópico `historial`. Por eso «hace cuánto llegó el último dato» usa lo recibido en vivo o la última muestra guardada.
+- Una lectura **retenida** (la que llega al conectar) se muestra pero no se suma al gráfico como muestra, porque no dice cuándo se midió; el historial real viene de `historial_largo` (y de `historial`). «Hace cuánto llegó el último dato» usa lo recibido en vivo o la última muestra del historial.
 - Si el reloj del ESP32 no está sincronizado (`fin` en 1970 o en el futuro), el `historial` se descarta.
 - Gráfico propio con Canvas (sin librería), con cortes donde faltan más de 15 min de datos.
 - `targetSdk = 36`. No se subió a 37 porque Android 17 exige un permiso en tiempo de ejecución para acceder a la red local (LAN) y no pude probarlo; con Tailscale (`100.x`) no aplica, pero para uso en LAN habría que revisarlo.

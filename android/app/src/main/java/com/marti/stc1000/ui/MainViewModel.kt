@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.marti.stc1000.Stc1000App
-import com.marti.stc1000.data.AppDatabase
 import com.marti.stc1000.data.ConnSettings
 import com.marti.stc1000.data.Sample
 import com.marti.stc1000.domain.Period
@@ -13,13 +12,10 @@ import com.marti.stc1000.mqtt.ConnectionState
 import com.marti.stc1000.mqtt.DeviceState
 import com.marti.stc1000.mqtt.MqttSupport
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -42,11 +38,9 @@ sealed interface TestState {
     data class Done(val ok: Boolean, val message: String) : TestState
 }
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val stcApp = app as Stc1000App
     private val repo = stcApp.repository
-    private val dao = AppDatabase.get(app).samples()
 
     private val period = MutableStateFlow(Period.TODAY)
     private val ticker = flow {
@@ -56,9 +50,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private val samples = combine(period, ticker) { p, now -> p.startEpoch(now) }
-        .distinctUntilChanged()
-        .flatMapLatest { dao.observeSince(it) }
+    private val samples = combine(period, ticker, repo.samples) { p, now, all ->
+        val from = p.startEpoch(now)
+        all.filter { it.ts >= from }
+    }
 
     val state: StateFlow<MainUiState> = combine(
         stcApp.settings.flow, repo.connection, repo.device, period, samples,
@@ -73,7 +68,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             stats = Stats.compute(list),
             nowSec = System.currentTimeMillis() / 1000,
         )
-    }.combine(dao.observeLast()) { ui, last -> ui.copy(lastSample = last) }
+    }.combine(repo.samples) { ui, all -> ui.copy(lastSample = all.lastOrNull()) }
         .combine(ticker) { ui, now -> ui.copy(nowSec = now) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
