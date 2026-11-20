@@ -23,6 +23,11 @@ data class ConnSettings(
     val isConfigured: Boolean get() = host.isNotBlank()
 
     fun topic(name: String): String = "${prefix.trim('/')}/$name"
+
+    companion object {
+        /** Nombre DNS o IP: letras sin tilde, números, puntos y guiones. */
+        val HOST_REGEX = Regex("^[A-Za-z0-9.\\-]+$")
+    }
 }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -41,7 +46,9 @@ class SettingsStore(private val context: Context) {
     val flow: Flow<ConnSettings> = context.dataStore.data.map { p ->
         val defaults = ConnSettings()
         ConnSettings(
-            host = p[Keys.host] ?: defaults.host,
+            // Una dirección guardada con caracteres inválidos (autocorrector, copiado mal) se descarta:
+            // la app queda "sin configurar" y abre Ajustes en vez de reintentar para siempre.
+            host = (p[Keys.host] ?: defaults.host).trim().takeIf { ConnSettings.HOST_REGEX.matches(it) } ?: "",
             port = p[Keys.port] ?: defaults.port,
             username = p[Keys.user] ?: defaults.username,
             password = p[Keys.passwordEnc]?.let { SecretBox.decrypt(it) } ?: "",

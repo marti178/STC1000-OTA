@@ -35,8 +35,6 @@ private val RAW_TEXT = KeyboardOptions(
     autoCorrectEnabled = false,
 )
 
-private val HOST_REGEX = Regex("^[A-Za-z0-9.\\-]+$")
-
 @Composable
 fun SettingsScreen(
     initial: ConnSettings,
@@ -54,7 +52,7 @@ fun SettingsScreen(
 
     val port = portText.toIntOrNull()
     val portOk = port != null && port in 1..65535
-    val hostOk = form.host.isBlank() || HOST_REGEX.matches(form.host.trim())
+    val hostOk = form.host.isBlank() || ConnSettings.HOST_REGEX.matches(form.host.trim())
     val valid = form.host.isNotBlank() && hostOk && portOk && form.prefix.isNotBlank()
     fun current() = form.copy(port = port ?: form.port)
 
