@@ -35,6 +35,14 @@
   No hay puertos abiertos en el router. Detalles en `server/README.md`.
 - IP fija del server reservada en el DHCP del router. El router reparte DNS 8.8.8.8 / 1.1.1.1.
 
+- **Historial en el server**: `stc1000-historial.service` (Python + paho-mqtt, usuario MQTT
+  `historial`) guarda cada muestra del `historial` del ESP32 en SQLite (400 días) y publica
+  retenido `stc1000/historial_largo` con 30 días. Ignora los retenidos (pueden ser viejos o de
+  prueba). Código en `server/historial/`; credenciales en `/etc/stc1000-historial.env` del server.
+- Datos de prueba que se publicaron para probar la app: ya limpiados del broker y de la base.
+- Actualizaciones de seguridad automáticas activadas (falta reiniciar el server por el kernel
+  nuevo). La revisión de seguridad del server está en un PDF fuera del repo (no se publica).
+
 ### App Android
 - `android/`, auditada. 23 tests unitarios pasan y `assembleDebug` compila.
 - APK publicado como release `app-v1.0.0` en GitHub.
@@ -69,7 +77,8 @@
 - Credenciales en NVS, no en el firmware: así el repo y el `firmware.bin` pueden ser públicos.
 - OTA por HTTPS sin validar el certificado de GitHub Pages; la integridad la da el SHA-256 de
   `version.json`.
-- El historial lo guarda el ESP32 (en RAM, se pierde al reiniciar) y la app lo acumula en Room;
-  no hay base de datos en el server.
+- El ESP32 guarda 24 h en RAM (se pierden al reiniciar). El server las acumula en SQLite
+  (servicio `stc1000-historial`, 400 días) y publica 30 días en `stc1000/historial_largo`; así la
+  app no depende de quedar abierta ni de tareas en segundo plano (que Xiaomi frena).
 - Sin hosting pago: desde afuera, la app entra por Tailscale Funnel (o por Tailscale). El ESP32
   no se expone: publica por la LAN.

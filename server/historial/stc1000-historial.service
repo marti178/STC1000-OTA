@@ -1,0 +1,22 @@
+[Unit]
+Description=STC-1000: guarda el historial en SQLite y publica stc1000/historial_largo
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stc1000-historial
+Group=stc1000-historial
+EnvironmentFile=/etc/stc1000-historial.env
+ExecStart=/usr/bin/python3 /opt/stc1000-historial/stc1000_historial.py
+StateDirectory=stc1000-historial
+Restart=always
+RestartSec=10
+# Endurecimiento: no necesita nada mas que su base y la red
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -30,7 +30,7 @@ Las contraseñas **no** están en este repo. Están en `C:\Users\marti\server-de
       y `max_connections 10`.
   - `/etc/mosquitto/passwd*`: usuarios y claves (hasheadas). No se copian al repo.
   - Los respaldos de las configuraciones anteriores están en `/etc/mosquitto/backup-*/`.
-- **Tailscale 1.104.6** (repo oficial pkgs.tailscale.com), habilitado en systemd. Nodo `debian`, IP `100.x.y.z`.
+- **Tailscale 1.104.7** (repo oficial pkgs.tailscale.com), habilitado en systemd. Nodo `debian`, IP `100.x.y.z`.
   - **Funnel**: `tailscale funnel --bg --tls-terminated-tcp=8443 tcp://127.0.0.1:1884`. Tailscale
     presenta el certificado TLS y le pasa la conexión ya descifrada a Mosquitto. La config queda
     guardada en tailscaled y vuelve sola después de un reinicio. Se ve con `tailscale funnel status`.
@@ -38,6 +38,12 @@ Las contraseñas **no** están en este repo. Están en `C:\Users\marti\server-de
   `/etc/nftables.d/mqtt-funnel.nft` (copia en [nftables/mqtt-funnel.nft](nftables/mqtt-funnel.nft)),
   que corta las conexiones nuevas a 127.0.0.1:1884 que pasen de 30 por minuto (con ráfaga de 20).
   Usa una tabla propia, así que no toca las reglas de Docker ni las de Tailscale.
+- **Historial largo** (`stc1000-historial.service`, habilitado): ver [más abajo](#historial-largo-30-días).
+- **Actualizaciones automáticas** (`unattended-upgrades`): todos los días instala las de Debian
+  (seguridad y versión estable) y las de Tailscale. Docker queda afuera a propósito, porque
+  actualizarlo reinicia todos los contenedores. No reinicia solo: si una actualización del kernel lo
+  pide, existe `/var/run/reboot-required`. Config en `/etc/apt/apt.conf.d/20auto-upgrades` y
+  `52unattended-tailscale`; log en `/var/log/unattended-upgrades/`.
 
 ### Usuarios y permisos
 
@@ -45,6 +51,7 @@ Las contraseñas **no** están en este repo. Están en `C:\Users\marti\server-de
 |---|---|---|---|---|
 | `stc1000` | ESP32 | solo 1883 (LAN/Tailscale) | `stc1000/#`, `homeassistant/#` | solo `stc1000/comando` |
 | `celular` | App Android | 1883 y Funnel (8443) | solo `stc1000/comando` | `stc1000/#` |
+| `historial` | Servicio `stc1000-historial` (en el server) | 1883 (localhost) | solo `stc1000/historial_largo` | solo `stc1000/historial` |
 
 No se permite el acceso anónimo. Todo lo que no esté en la ACL está prohibido.
 
@@ -138,3 +145,40 @@ mosquitto_sub -h SERVIDOR.TU-TAILNET.ts.net -p 8443 --capath /etc/ssl/certs \
 - **IP de LAN fija**: está reservada en el DHCP del router por la MAC del WiFi del server. El ESP32
   la tiene grabada (`MQTT_HOST`). Si alguna vez cambia, se corrige en el ESP32 por el monitor serie
   con `set mqtt_host NUEVA_IP`.
+
+## Historial largo (30 días)
+
+El ESP32 solo guarda 24 h. Para no depender del celular, el **server** guarda todas las muestras y
+publica una ventana de 30 días.
+
+- **Servicio**: `stc1000-historial.service` (systemd, habilitado, usuario de sistema
+  `stc1000-historial`). Código en [historial/stc1000_historial.py](historial/stc1000_historial.py),
+  instalado en `/opt/stc1000-historial/`; unidad en [historial/stc1000-historial.service](historial/stc1000-historial.service).
+  Usa Python 3 con `python3-paho-mqtt` (paquete de Debian).
+- **Entrada**: se suscribe a `stc1000/historial` (`{"paso_s":300,"fin":<epoch UTC>,"t":[...]}`, 24 h,
+  que el ESP32 publica cada 5 min). Cada muestra se guarda en SQLite
+  (`/var/lib/stc1000-historial/historial.db`, tabla `muestras(ts, temp)`) con
+  `ts = fin - (len-1-i)*paso_s`. Los `null` no se guardan y, ante el mismo `ts`, gana el valor más nuevo.
+  Si el server o el servicio estuvieron caídos, el siguiente historial del ESP32 recupera hasta 24 h.
+- **Ignora los mensajes que llegan como retenidos**: así nunca entra un historial viejo o de prueba,
+  como el ficticio que se publicó el 20/11/2026 para probar la app. No se pierde nada, porque el ESP32
+  republica las 24 h completas cada 5 min.
+- **Salida**: publica **retenido, QoS 1** en `stc1000/historial_largo` con el mismo formato:
+  `{"paso_s":300,"fin":<ts de la última muestra guardada>,"t":[...]}`. Incluye hasta 8640 valores
+  (30 días), de la más vieja a la más nueva, con `null` donde falta. Se publica al arrancar, después
+  de cada historial recibido y cada 5 min. Si la base está vacía, no publica nada.
+- **Retención**: se guardan 400 días (unas 115 000 filas, muy poco espacio).
+- **Clave del broker**: usuario `historial`, con la clave en `/etc/stc1000-historial.env`
+  (root:stc1000-historial, 0640). No está en el repo.
+
+```bash
+sudo journalctl -u stc1000-historial -f        # qué recibe y qué publica
+sudo python3 -c "import sqlite3; print(sqlite3.connect('/var/lib/stc1000-historial/historial.db').execute('select count(*), datetime(min(ts),\"unixepoch\"), datetime(max(ts),\"unixepoch\") from muestras').fetchone())"
+
+# Actualizar el código después de cambiar historial/stc1000_historial.py
+scp server/historial/stc1000_historial.py server@IP_LAN_DEL_SERVER:/tmp/
+ssh server@IP_LAN_DEL_SERVER 'sudo install -m 755 /tmp/stc1000_historial.py /opt/stc1000-historial/ && sudo systemctl restart stc1000-historial'
+
+# Empezar de cero (borra todo el historial guardado)
+sudo systemctl stop stc1000-historial && sudo rm -f /var/lib/stc1000-historial/historial.db* && sudo systemctl start stc1000-historial
+```

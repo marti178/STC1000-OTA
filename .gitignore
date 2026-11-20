@@ -18,3 +18,6 @@ android/captures/
 *.aab
 *.keystore
 *.jks
+
+# Documentos con detalles de la red/seguridad del server: no van al repo publico
+*.pdf

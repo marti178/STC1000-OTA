@@ -11,3 +11,8 @@ topic read stc1000/comando
 user celular
 topic read stc1000/#
 topic write stc1000/comando
+
+# Servicio stc1000-historial (en el server): lee el historial de 24 h y publica el de 30 dias
+user historial
+topic read stc1000/historial
+topic write stc1000/historial_largo
