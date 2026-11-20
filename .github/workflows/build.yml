@@ -1,0 +1,77 @@
+name: Build and Deploy OTA
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "android/**"
+      - "server/**"
+      - "docs/**"
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      # El firmware publicado NO lleva claves: el WiFi y el MQTT quedan guardados
+      # en la flash del ESP32 (NVS) y el OTA no los borra. Por eso no hay secrets.h.
+      - name: Check that no secrets are committed
+        run: |
+          if [ -f include/secrets.h ]; then echo "::error::include/secrets.h no debe estar en el repo"; exit 1; fi
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Prepare OTA files
+        run: |
+          VERSION=$(tr -d '[:space:]' < version.txt)
+          mkdir site
+          cp .pio/build/esp32c3/firmware.bin site/firmware.bin
+          SHA=$(sha256sum site/firmware.bin | cut -d' ' -f1)
+          SIZE=$(stat -c%s site/firmware.bin)
+          printf '{\n  "version": "%s",\n  "firmware": "firmware.bin",\n  "sha256": "%s",\n  "size": %s\n}\n' "$VERSION" "$SHA" "$SIZE" > site/version.json
+          cat site/version.json
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
