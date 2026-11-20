@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Guarda en SQLite el historial que publica el ESP32 (stc1000/historial, 24 h cada 5 min)
 # y publica retenido stc1000/historial_largo con los ultimos 30 dias.
-# La base es una ventana movil: se borra lo de mas de 31 dias y una vez por dia se
+# La base es una ventana movil: se borra lo de mas de 400 dias y una vez por dia se
 # compacta el archivo (VACUUM), asi no crece sin fin.
 #
 # Formato de los dos topicos: {"paso_s":300,"fin":<epoch UTC>,"t":[...]}
@@ -34,7 +34,7 @@ T_ENTRADA = f"{BASE}/historial"
 T_SALIDA = f"{BASE}/historial_largo"
 PASO_S = 300
 VENTANA = 30 * 24 * 3600 // PASO_S       # 8640 muestras = 30 dias
-RETENCION_S = 31 * 24 * 3600             # ventana movil: lo mas viejo se borra
+RETENCION_S = 400 * 24 * 3600            # ventana movil de algo mas de 1 anio
 CADA_S = 300                             # publicar cada 5 min
 VACUUM_CADA_S = 24 * 3600                # compactar el archivo una vez por dia
 
@@ -66,7 +66,7 @@ def guardar(db, payload):
 
 
 def podar(db, compactar=False):
-    """Borra lo de mas de 31 dias; con compactar, achica el archivo (VACUUM)."""
+    """Borra lo de mas de 400 dias; con compactar, achica el archivo (VACUUM)."""
     with lock:
         n = db.execute("DELETE FROM muestras WHERE ts < ?", (int(time.time()) - RETENCION_S,)).rowcount
         db.commit()

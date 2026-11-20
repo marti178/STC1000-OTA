@@ -173,10 +173,10 @@ publica una ventana de 30 días.
   `{"paso_s":300,"fin":<ts de la última muestra guardada>,"t":[...]}`. Incluye hasta 8640 valores
   (30 días), de la más vieja a la más nueva, con `null` donde falta. Se publica al arrancar, después
   de cada historial recibido y cada 5 min. Si la base está vacía, no publica nada.
-- **Retención: ventana móvil de 31 días.** Cada 5 min se borra lo que tenga más de 31 días, y una
-  vez por día (y al arrancar) se compacta el archivo con `VACUUM`, así no crece sin fin. Con 31
-  días completos son 8928 filas: el archivo ocupa unos 170 KB, y `historial_largo` (8640 valores)
-  pesa unos 42 KB.
+- **Retención: ventana móvil de 400 días.** Cada 5 min se borra lo que tenga más de 400 días, y una
+  vez por día (y al arrancar) se compacta el archivo con `VACUUM`, así no crece sin fin. Con 400
+  días completos son 115 200 filas y el archivo ocupa unos 2 MB (el `VACUUM` tarda unos 0,03 s).
+  `historial_largo` sigue siendo de 30 días (8640 valores, unos 42 KB).
 - **Clave del broker**: usuario `historial`, con la clave en `/etc/stc1000-historial.env`
   (root:stc1000-historial, 0640). No está en el repo.
 
