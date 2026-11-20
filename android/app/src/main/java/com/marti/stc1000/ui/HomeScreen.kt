@@ -300,6 +300,7 @@ private fun ChartCard(state: MainUiState, onPeriod: (Period) -> Unit) {
                 showAverage = p.showAverage,
                 showMinMax = p.showMinMax,
                 range = if (p.rangeEnabled) p.rangeMin..p.rangeMax else null,
+                zoomKey = state.period,
             )
         }
     }

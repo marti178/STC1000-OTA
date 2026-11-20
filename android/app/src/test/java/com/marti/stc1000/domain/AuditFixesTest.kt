@@ -95,3 +95,44 @@ class AuditFixesTest {
         assertEquals(seg, decimate(seg, 600))
     }
 }
+
+/** Zoom del grafico: pellizco y arrastre con dos dedos. */
+class ChartZoomTest {
+    private val fs = 0.0
+    private val fe = 86_400.0 // un dia
+    private val plotW = 1000f
+
+    @Test
+    fun acercarConservaElPuntoBajoLosDedos() {
+        // Dedos en el centro del grafico: el instante del medio sigue en el medio.
+        val w = com.marti.stc1000.ui.transformWindow(fs, fe, fs, fe, 2f, 0f, 500f, plotW)!!
+        assertEquals(43_200.0, (w.start + w.end) / 2, 1.0)
+        assertEquals(43_200.0, w.end - w.start, 1.0)
+    }
+
+    @Test
+    fun arrastrarMueveLaVentanaYNoSeSaleDelRango() {
+        val zoomed = com.marti.stc1000.ui.transformWindow(fs, fe, fs, fe, 4f, 0f, 500f, plotW)!!
+        // Dedos hacia la derecha: se ve lo anterior; hasta el borde y no mas.
+        var w = zoomed
+        repeat(50) { w = com.marti.stc1000.ui.transformWindow(w.start, w.end, fs, fe, 1f, 400f, 500f, plotW)!! }
+        assertEquals(fs, w.start, 1e-6)
+        repeat(50) { w = com.marti.stc1000.ui.transformWindow(w.start, w.end, fs, fe, 1f, -400f, 500f, plotW)!! }
+        assertEquals(fe, w.end, 1e-6)
+    }
+
+    @Test
+    fun noSeAcercaMasDeMediaHoraYAlejarVuelveALaVistaCompleta() {
+        var w: com.marti.stc1000.ui.ViewWindow? = com.marti.stc1000.ui.ViewWindow(fs, fe)
+        repeat(30) {
+            val c = w!!
+            w = com.marti.stc1000.ui.transformWindow(c.start, c.end, fs, fe, 2f, 0f, 500f, plotW)
+        }
+        assertEquals(1800.0, w!!.end - w!!.start, 1e-6)
+        repeat(30) {
+            val c = w ?: return@repeat
+            w = com.marti.stc1000.ui.transformWindow(c.start, c.end, fs, fe, 0.5f, 0f, 500f, plotW)
+        }
+        assertEquals(null, w)
+    }
+}

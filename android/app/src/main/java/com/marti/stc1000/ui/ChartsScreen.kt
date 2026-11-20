@@ -53,6 +53,7 @@ fun ChartsScreen(
                     showAverage = p.showAverage,
                     showMinMax = p.showMinMax,
                     range = range,
+                    zoomKey = state.period,
                     chartHeight = 280.dp,
                 )
             }

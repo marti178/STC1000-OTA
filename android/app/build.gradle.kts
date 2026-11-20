@@ -13,8 +13,8 @@ android {
         applicationId = "com.marti.stc1000"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "2.0.1"
+        versionCode = 11
+        versionName = "2.1.0"
     }
 
     signingConfigs {

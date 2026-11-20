@@ -4,15 +4,21 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,8 +39,11 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -95,10 +104,44 @@ private fun segmentsOf(samples: List<Sample>): List<List<Sample>> {
     return out
 }
 
+/** Ventana visible del eje X, en epoch segundos. */
+internal data class ViewWindow(val start: Double, val end: Double)
+
+/** Zoom maximo: no se acerca mas que esto (30 min = 6 lecturas de 5 min). */
+private const val MIN_VIEW_SPAN_SEC = 1800.0
+
+/**
+ * Calcula la nueva ventana visible despues de un gesto de pellizco/arrastre con dos dedos.
+ * [zoom] > 1 acerca; [panPx] es lo que se movieron los dedos (el contenido los acompana); [focusPx] es el punto
+ * (relativo al borde izquierdo del grafico) que queda fijo bajo los dedos. Devuelve null si queda toda la serie.
+ */
+internal fun transformWindow(
+    viewStart: Double,
+    viewEnd: Double,
+    fullStart: Double,
+    fullEnd: Double,
+    zoom: Float,
+    panPx: Float,
+    focusPx: Float,
+    plotW: Float,
+): ViewWindow? {
+    val fullSpan = fullEnd - fullStart
+    if (fullSpan <= MIN_VIEW_SPAN_SEC || plotW <= 0f) return null
+    val span = viewEnd - viewStart
+    val newSpan = (span / zoom.coerceIn(0.2f, 5f)).coerceIn(MIN_VIEW_SPAN_SEC, fullSpan)
+    val focusFrac = (focusPx / plotW).coerceIn(0f, 1f).toDouble()
+    val focusT = viewStart + focusFrac * span
+    val start = (focusT - focusFrac * newSpan - (panPx / plotW) * newSpan)
+        .coerceIn(fullStart, fullEnd - newSpan)
+    return if (newSpan >= fullSpan * 0.995) null else ViewWindow(start, start + newSpan)
+}
+
 /**
  * Gráfico de línea con área degradada, hecho con Canvas (sin dependencias): curva suave opcional,
  * banda de rango deseado, línea de promedio, marcas de mínima y máxima, huecos reales y selección táctil.
- * El eje X cubre [startSec, endSec]; el eje Y se ajusta a los datos (y a la banda, si hay).
+ * Se puede hacer zoom pellizcando con dos dedos y moverse arrastrando con dos dedos. [zoomKey] vuelve a la vista
+ * completa cuando cambia (por ejemplo al elegir otro período).
+ * El eje X cubre [startSec, endSec] (o la parte con zoom); el eje Y se ajusta a lo que se ve (y a la banda, si hay).
  */
 @Composable
 fun TemperatureChart(
@@ -112,6 +155,7 @@ fun TemperatureChart(
     showMinMax: Boolean = true,
     range: ClosedFloatingPointRange<Double>? = null,
     chartHeight: Dp = 220.dp,
+    zoomKey: Any = Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     val lineColor = cs.primary
@@ -127,13 +171,35 @@ fun TemperatureChart(
     // dato nuevo no la borra ni corta el arrastre.
     var selectedTs by remember { mutableStateOf<Long?>(null) }
     val selected = selectedTs?.let { ts -> samples.firstOrNull { it.ts == ts } }
+    var zoom by remember(zoomKey) { mutableStateOf<ViewWindow?>(null) }
+
+    // Ventana visible, siempre dentro del rango completo aunque este se haya movido (llegan datos nuevos).
+    val fullStart = startSec.toDouble()
+    val fullEnd = endSec.toDouble()
+    val z = zoom
+    val viewSpanOk = fullEnd - fullStart > MIN_VIEW_SPAN_SEC
+    val vs = if (z != null && viewSpanOk) {
+        z.start.coerceIn(fullStart, fullEnd - MIN_VIEW_SPAN_SEC)
+    } else {
+        fullStart
+    }
+    val ve = if (z != null && viewSpanOk) z.end.coerceIn(vs + MIN_VIEW_SPAN_SEC, fullEnd) else fullEnd
+    val zoomed = z != null && viewSpanOk
+    val vSpan = (ve - vs).coerceAtLeast(1.0)
+
     val currentSamples by rememberUpdatedState(samples)
-    val currentStart by rememberUpdatedState(startSec)
-    val currentEnd by rememberUpdatedState(endSec)
+    val currentWindow by rememberUpdatedState(ViewWindow(vs, ve))
+    val currentFull by rememberUpdatedState(ViewWindow(fullStart, fullEnd))
 
     Column(modifier) {
         // Lectura de la muestra seleccionada (o ayuda), con altura fija para que no salte el layout.
-        Box(Modifier.height(32.dp), contentAlignment = Alignment.CenterStart) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(36.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
             val s = selected
             if (s != null) {
                 Text(
@@ -145,8 +211,19 @@ fun TemperatureChart(
                     color = cs.onSurface,
                 )
             } else if (samples.isNotEmpty()) {
-                Text("Tocá o arrastrá para ver cada lectura", style = MaterialTheme.typography.bodySmall, color = labelColor)
+                Text(
+                    if (zoomed) {
+                        "Zoom ×" + String.format(java.util.Locale.US, "%.1f", (fullEnd - fullStart) / vSpan)
+                    } else {
+                        "Tocá una lectura · pellizcá para hacer zoom"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = labelColor,
+                )
+            } else {
+                Spacer(Modifier)
             }
+            if (zoomed) TextButton(onClick = { zoom = null }) { Text("Restablecer") }
         }
         if (samples.isEmpty()) {
             Box(Modifier.fillMaxWidth().height(chartHeight - 40.dp), contentAlignment = Alignment.Center) {
@@ -159,9 +236,16 @@ fun TemperatureChart(
             return@Column
         }
 
-        val minS = samples.minBy { it.temp }
-        val maxS = samples.maxBy { it.temp }
-        val avg = samples.sumOf { it.temp } / samples.size
+        // Lo que se ve (con un poco de margen para que la linea entre y salga de la ventana sin cortes).
+        val margin = 600.0
+        val visible = remember(samples, vs, ve) {
+            if (!zoomed) samples else samples.filter { it.ts >= vs - margin && it.ts <= ve + margin }
+        }
+        val inView = remember(visible, vs, ve) { visible.filter { it.ts >= vs && it.ts <= ve } }
+        val stat = inView.ifEmpty { visible.ifEmpty { samples } }
+        val minS = stat.minBy { it.temp }
+        val maxS = stat.maxBy { it.temp }
+        val avg = stat.sumOf { it.temp } / stat.size
         var lo = minS.temp
         var hi = maxS.temp
         if (range != null) {
@@ -172,33 +256,59 @@ fun TemperatureChart(
         val mid = (lo + hi) / 2
         val yMin = mid - span / 2 - span * 0.12
         val yMax = mid + span / 2 + span * 0.12
-        val xSpan = (endSec - startSec).coerceAtLeast(1).toDouble()
         // Para dibujar se reducen los puntos (30 dias son 8640): el calculo de estadisticas usa todos.
-        val segments = remember(samples) { segmentsOf(samples).map { decimate(it, MAX_POINTS_PER_SEGMENT) } }
+        val segments = remember(visible) { segmentsOf(visible).map { decimate(it, MAX_POINTS_PER_SEGMENT) } }
         val description = "Gráfico de temperatura. Mínima ${Format.temp(minS.temp, unit)}, máxima " +
-            "${Format.temp(maxS.temp, unit)}, promedio ${Format.temp(avg, unit)}, ${samples.size} lecturas."
+            "${Format.temp(maxS.temp, unit)}, promedio ${Format.temp(avg, unit)}, ${stat.size} lecturas."
 
         Canvas(
             Modifier
                 .fillMaxWidth()
                 .height(chartHeight)
                 .semantics { contentDescription = description }
-                .pointerInput(Unit) {
+                .pointerInput(zoomKey) {
                     val left = 44.dp.toPx()
                     val right = 8.dp.toPx()
-                    val plotW = size.width - left - right
-                    fun pick(x: Float) {
-                        val span = (currentEnd - currentStart).coerceAtLeast(1).toDouble()
-                        val t = currentStart + ((x - left) / plotW).coerceIn(0f, 1f) * span
-                        selectedTs = currentSamples.minByOrNull { abs(it.ts - t) }?.ts
-                    }
+                    val slop = viewConfiguration.touchSlop
                     awaitEachGesture {
+                        val plotW = size.width - left - right
+                        fun pick(x: Float) {
+                            val w = currentWindow
+                            val t = w.start + ((x - left) / plotW).coerceIn(0f, 1f) * (w.end - w.start)
+                            selectedTs = currentSamples.minByOrNull { abs(it.ts - t) }?.ts
+                        }
                         val down = awaitFirstDown()
                         pick(down.position.x)
-                        drag(down.id) {
-                            pick(it.position.x)
-                            it.consume()
-                        }
+                        var multi = false
+                        var horizontal = false
+                        var dx = 0f
+                        var dy = 0f
+                        do {
+                            val event = awaitPointerEvent()
+                            val pressed = event.changes.filter { it.pressed }
+                            if (pressed.size >= 2) {
+                                // Dos dedos: pellizco = zoom, arrastre = moverse por el tiempo.
+                                multi = true
+                                val w = currentWindow
+                                val f = currentFull
+                                val newWindow = transformWindow(
+                                    w.start, w.end, f.start, f.end,
+                                    event.calculateZoom(), event.calculatePan().x,
+                                    event.calculateCentroid().x - left, plotW,
+                                )
+                                zoom = newWindow
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            } else if (!multi && pressed.size == 1) {
+                                // Un dedo: elegir lectura. Si el movimiento es vertical se deja pasar (scroll de la pantalla).
+                                val c = pressed[0]
+                                dx += c.positionChange().x
+                                dy += c.positionChange().y
+                                if (!horizontal && abs(dy) > slop && abs(dy) > abs(dx)) break
+                                if (abs(dx) > slop) horizontal = true
+                                pick(c.position.x)
+                                if (horizontal && c.positionChanged()) c.consume()
+                            }
+                        } while (event.changes.any { it.pressed })
                     }
                 },
         ) {
@@ -210,7 +320,7 @@ fun TemperatureChart(
             val plotH = size.height - top - bottom
             val baseY = top + plotH
 
-            fun xOf(ts: Long) = left + ((ts - startSec) / xSpan).toFloat().coerceIn(0f, 1f) * plotW
+            fun xOf(ts: Long) = left + ((ts - vs) / vSpan).toFloat() * plotW
             fun yOf(v: Double) = top + (1f - ((v - yMin) / (yMax - yMin)).toFloat()) * plotH
 
             // Banda de rango deseado.
@@ -232,74 +342,88 @@ fun TemperatureChart(
                 val label = measurer.measure(axisNumber(v, unit), labelStyle)
                 drawText(label, topLeft = Offset(left - label.size.width - 6.dp.toPx(), y - label.size.height / 2f))
             }
-            // Etiquetas de tiempo.
-            val longRange = endSec - startSec > 26 * 3600
+            // Etiquetas de tiempo: se adaptan a lo que se ve.
+            val longRange = vSpan > 26 * 3600
             for (i in 0..4) {
-                val ts = startSec + ((endSec - startSec) * i / 4)
+                val ts = (vs + vSpan * i / 4).toLong()
                 val text = if (longRange) Format.day(ts) else Format.hour(ts)
                 val label = measurer.measure(text, labelStyle)
                 val x = (xOf(ts) - label.size.width / 2f).coerceIn(0f, size.width - label.size.width)
                 drawText(label, topLeft = Offset(x, size.height - label.size.height))
             }
 
-            // Línea de promedio.
-            if (showAverage && samples.size > 1) {
+            // Todo lo que sigue se recorta a la zona del grafico (con zoom hay datos fuera de la ventana).
+            clipRect(left = left, top = 0f, right = left + plotW, bottom = baseY + 1f) {
+                // Línea de promedio.
+                if (showAverage && stat.size > 1) {
+                    val y = yOf(avg)
+                    drawLine(markerColor.copy(alpha = 0.55f), Offset(left, y), Offset(left + plotW, y), 1.2.dp.toPx(), pathEffect = dash)
+                }
+
+                // Área + línea por segmento.
+                val fill = Brush.verticalGradient(
+                    colors = listOf(lineColor.copy(alpha = 0.30f), lineColor.copy(alpha = 0f)),
+                    startY = top,
+                    endY = baseY,
+                )
+                for (seg in segments) {
+                    if (seg.size < 2) {
+                        drawCircle(lineColor, 3.5.dp.toPx(), Offset(xOf(seg[0].ts), yOf(seg[0].temp)))
+                        continue
+                    }
+                    val line = Path()
+                    var px = 0f
+                    var py = 0f
+                    seg.forEachIndexed { i, s ->
+                        val x = xOf(s.ts)
+                        val y = yOf(s.temp)
+                        when {
+                            i == 0 -> line.moveTo(x, y)
+                            smooth -> {
+                                val cx = (px + x) / 2f
+                                line.cubicTo(cx, py, cx, y, x, y) // tangentes horizontales: curva suave sin sobrepasos
+                            }
+                            else -> line.lineTo(x, y)
+                        }
+                        px = x
+                        py = y
+                    }
+                    val area = Path().apply {
+                        addPath(line)
+                        lineTo(xOf(seg.last().ts), baseY)
+                        lineTo(xOf(seg.first().ts), baseY)
+                        close()
+                    }
+                    drawPath(area, fill)
+                    drawPath(line, lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    // Con zoom, cada lectura se marca con un punto para ver cuantas hay.
+                    if (zoomed && vSpan < 6 * 3600) {
+                        seg.forEach { s -> drawCircle(lineColor, 2.5.dp.toPx(), Offset(xOf(s.ts), yOf(s.temp))) }
+                    }
+                }
+            }
+
+            // Promedio: la etiqueta va fuera del recorte para que se lea completa.
+            if (showAverage && stat.size > 1) {
                 val y = yOf(avg)
-                drawLine(markerColor.copy(alpha = 0.55f), Offset(left, y), Offset(left + plotW, y), 1.2.dp.toPx(), pathEffect = dash)
                 val label = measurer.measure("prom. " + axisNumber(avg, unit), labelStyle.copy(color = markerColor))
                 drawText(label, topLeft = Offset(left + plotW - label.size.width - 2.dp.toPx(), y - label.size.height - 1.dp.toPx()))
             }
 
-            // Área + línea por segmento.
-            val fill = Brush.verticalGradient(
-                colors = listOf(lineColor.copy(alpha = 0.30f), lineColor.copy(alpha = 0f)),
-                startY = top,
-                endY = baseY,
-            )
-            for (seg in segments) {
-                if (seg.size < 2) {
-                    drawCircle(lineColor, 3.5.dp.toPx(), Offset(xOf(seg[0].ts), yOf(seg[0].temp)))
-                    continue
-                }
-                val line = Path()
-                var px = 0f
-                var py = 0f
-                seg.forEachIndexed { i, s ->
-                    val x = xOf(s.ts)
-                    val y = yOf(s.temp)
-                    when {
-                        i == 0 -> line.moveTo(x, y)
-                        smooth -> {
-                            val cx = (px + x) / 2f
-                            line.cubicTo(cx, py, cx, y, x, y) // tangentes horizontales: curva suave sin sobrepasos
-                        }
-                        else -> line.lineTo(x, y)
-                    }
-                    px = x
-                    py = y
-                }
-                val area = Path().apply {
-                    addPath(line)
-                    lineTo(xOf(seg.last().ts), baseY)
-                    lineTo(xOf(seg.first().ts), baseY)
-                    close()
-                }
-                drawPath(area, fill)
-                drawPath(line, lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-            }
-
-            // Marcas de mínima y máxima.
-            if (showMinMax && samples.size > 1 && maxS.temp - minS.temp > 0.05) {
+            // Marcas de mínima y máxima (solo de lo que se ve).
+            if (showMinMax && stat.size > 1 && maxS.temp - minS.temp > 0.05) {
                 markExtreme(maxS, true, ::xOf, ::yOf, measurer, labelStyle, unit, lineColor, surface, top, size.width)
                 markExtreme(minS, false, ::xOf, ::yOf, measurer, labelStyle, unit, lineColor, surface, top, size.width)
             }
 
             selected?.let { s ->
-                val x = xOf(s.ts)
-                val y = yOf(s.temp)
-                drawLine(markerColor.copy(alpha = 0.5f), Offset(x, top), Offset(x, baseY), strokeWidth = 1.dp.toPx())
-                drawCircle(surface, 7.dp.toPx(), Offset(x, y))
-                drawCircle(markerColor, 5.dp.toPx(), Offset(x, y))
+                if (s.ts >= vs && s.ts <= ve) {
+                    val x = xOf(s.ts)
+                    val y = yOf(s.temp)
+                    drawLine(markerColor.copy(alpha = 0.5f), Offset(x, top), Offset(x, baseY), strokeWidth = 1.dp.toPx())
+                    drawCircle(surface, 7.dp.toPx(), Offset(x, y))
+                    drawCircle(markerColor, 5.dp.toPx(), Offset(x, y))
+                }
             }
         }
     }
