@@ -22,11 +22,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.marti.stc1000.data.ConnSettings
+
+/** Teclado sin autocorrector ni mayúsculas automáticas: para hosts, usuarios y prefijos. */
+private val RAW_TEXT = KeyboardOptions(
+    capitalization = KeyboardCapitalization.None,
+    autoCorrectEnabled = false,
+)
+
+private val HOST_REGEX = Regex("^[A-Za-z0-9.\\-]+$")
 
 @Composable
 fun SettingsScreen(
@@ -45,7 +54,8 @@ fun SettingsScreen(
 
     val port = portText.toIntOrNull()
     val portOk = port != null && port in 1..65535
-    val valid = form.host.isNotBlank() && portOk && form.prefix.isNotBlank()
+    val hostOk = form.host.isBlank() || HOST_REGEX.matches(form.host.trim())
+    val valid = form.host.isNotBlank() && hostOk && portOk && form.prefix.isNotBlank()
     fun current() = form.copy(port = port ?: form.port)
 
     fun change(block: () -> Unit) {
@@ -69,10 +79,16 @@ fun SettingsScreen(
                     value = form.host,
                     onValueChange = { v -> change { form = form.copy(host = v) } },
                     label = { Text("Dirección (nombre o IP)") },
-                    supportingText = { Text("Ej.: mi-server.tu-red.ts.net, o una IP de la red local") },
+                    supportingText = {
+                        Text(
+                            if (hostOk) "Ej.: mi-server.tu-red.ts.net, o una IP de la red local"
+                            else "Solo letras sin tilde, números, puntos y guiones.",
+                        )
+                    },
                     singleLine = true,
+                    isError = !hostOk,
                     shape = MaterialTheme.shapes.medium,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    keyboardOptions = RAW_TEXT.copy(keyboardType = KeyboardType.Uri),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -117,6 +133,7 @@ fun SettingsScreen(
                     label = { Text("Usuario") },
                     singleLine = true,
                     shape = MaterialTheme.shapes.medium,
+                    keyboardOptions = RAW_TEXT,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -144,6 +161,7 @@ fun SettingsScreen(
                     onValueChange = { v -> change { form = form.copy(prefix = v) } },
                     label = { Text("Prefijo") },
                     supportingText = { Text("Tiene que ser el mismo que usa el firmware (por defecto stc1000).") },
+                    keyboardOptions = RAW_TEXT,
                     singleLine = true,
                     isError = form.prefix.isBlank(),
                     shape = MaterialTheme.shapes.medium,
