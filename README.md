@@ -72,12 +72,13 @@ los 5 V de la fuente original. Más detalles en `docs/`.
 
 ## Red
 
-El ESP32 publica al Mosquitto del server **por la LAN** (puerto 1883). El celular llega desde
-afuera de casa con **Tailscale**. No hay puertos abiertos en el router. Configuración del server
-en `server/`.
+El ESP32 publica al Mosquitto del server **solo por la LAN** (puerto 1883). La app del celular
+llega desde afuera de casa por **Tailscale Funnel** (puerto 8443, TLS), a un listener aparte que
+solo acepta al usuario `celular`, o por Tailscale. No hay puertos abiertos en el router.
+Configuración del server en `server/`.
 
 El firmware también soporta MQTT con **TLS**: si `MQTT_PORT` es 8443 u 8883, valida el certificado
 contra las raíces de Let's Encrypt (`include/ca_letsencrypt.h`), después de tomar la hora por NTP.
-Hoy no se usa (se probó para Tailscale Funnel y se descartó).
+Hoy el ESP32 no lo usa: el listener de Funnel no acepta al usuario `stc1000`.
 
 Estado del proyecto y pendientes: [`docs/ESTADO.md`](docs/ESTADO.md).

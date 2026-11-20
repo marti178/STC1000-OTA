@@ -1,0 +1,4 @@
+# ACL del listener de internet (Tailscale Funnel): solo la app.
+user celular
+topic read stc1000/#
+topic write stc1000/comando

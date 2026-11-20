@@ -1,0 +1,10 @@
+# Limite de conexiones nuevas al listener de internet de Mosquitto (127.0.0.1:1884,
+# al que llega Tailscale Funnel). Tabla propia: no toca las reglas de Docker ni Tailscale.
+table inet mqtt_funnel
+delete table inet mqtt_funnel
+table inet mqtt_funnel {
+	chain input {
+		type filter hook input priority filter - 5; policy accept;
+		iifname "lo" tcp dport 1884 ct state new limit rate over 30/minute burst 20 packets counter drop
+	}
+}

@@ -20,15 +20,19 @@
 ### Firmware
 - v1.0.0: MQTT, filtro de lecturas estables, historial 24 h (NTP), OTA desde Pages con SHA-256
   y rollback por software, configuración en NVS, autodescubrimiento de Home Assistant.
-- v1.0.1: MQTT con TLS si el puerto es 8443/8883 (se hizo para Tailscale Funnel, que después se
-  descartó; el código queda, no molesta).
+- v1.0.1: MQTT con TLS si el puerto es 8443/8883. El ESP32 no lo usa (va por la LAN); queda por
+  si algún día tiene que publicar desde afuera de casa.
 - GitHub Actions compila y publica bien. `https://marti178.github.io/STC1000-OTA/version.json`
   dice 1.0.1.
 
 ### Server Debian
-- Mosquitto en la LAN, puerto 1883, usuarios `stc1000` (ESP32) y `celular` (app), ACL, sin
-  anónimos, persistencia con autosave cada 60 s. Probado por LAN y por Tailscale.
-- **Solo LAN + Tailscale.** No hay puertos abiertos ni Funnel: el usuario eligió eso.
+- Mosquitto, puerto 1883 (LAN y Tailscale), usuarios `stc1000` (ESP32) y `celular` (app), ACL,
+  sin anónimos, persistencia con autosave cada 60 s. Probado por LAN y por Tailscale.
+- **Tailscale Funnel activo, solo para la app**: `:8443` con TLS (Let's Encrypt) → listener
+  `127.0.0.1:1884` con su propio archivo de claves (solo `celular`) y su ACL, `max_connections 10`
+  y un límite de conexiones nuevas por minuto con nftables. Probado desde internet: entra
+  `celular`; anónimo, clave mala y `stc1000` son rechazados. El ESP32 sigue solo por la LAN.
+  No hay puertos abiertos en el router. Detalles en `server/README.md`.
 - IP fija del server reservada en el DHCP del router. El router reparte DNS 8.8.8.8 / 1.1.1.1.
 
 ### App Android
@@ -67,4 +71,5 @@
   `version.json`.
 - El historial lo guarda el ESP32 (en RAM, se pierde al reiniciar) y la app lo acumula en Room;
   no hay base de datos en el server.
-- Sin hosting pago: acceso desde afuera solo con Tailscale.
+- Sin hosting pago: desde afuera, la app entra por Tailscale Funnel (o por Tailscale). El ESP32
+  no se expone: publica por la LAN.
