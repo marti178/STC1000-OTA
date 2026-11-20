@@ -117,6 +117,12 @@ tailscale funnel status                         # que el Funnel siga activo
 sudo nft list table inet mqtt_funnel            # contador de conexiones cortadas por el límite
 ```
 
+Los logs tienen tope, así que no llenan el disco:
+- **journal de systemd**: `/etc/systemd/journald.conf.d/limite.conf` (`SystemMaxUse=300M`,
+  `SystemKeepFree=2G`, `MaxFileSec=1month`). Se ve con `journalctl --disk-usage`.
+- **Mosquitto**: `/etc/logrotate.d/mosquitto` (viene con el paquete). Rota al pasar 100 KB y
+  guarda 7 copias comprimidas, o sea alrededor de 1 MB en total.
+
 ## Probar con mosquitto_sub / mosquitto_pub
 
 ```bash
@@ -167,7 +173,10 @@ publica una ventana de 30 días.
   `{"paso_s":300,"fin":<ts de la última muestra guardada>,"t":[...]}`. Incluye hasta 8640 valores
   (30 días), de la más vieja a la más nueva, con `null` donde falta. Se publica al arrancar, después
   de cada historial recibido y cada 5 min. Si la base está vacía, no publica nada.
-- **Retención**: se guardan 400 días (unas 115 000 filas, muy poco espacio).
+- **Retención: ventana móvil de 31 días.** Cada 5 min se borra lo que tenga más de 31 días, y una
+  vez por día (y al arrancar) se compacta el archivo con `VACUUM`, así no crece sin fin. Con 31
+  días completos son 8928 filas: el archivo ocupa unos 170 KB, y `historial_largo` (8640 valores)
+  pesa unos 42 KB.
 - **Clave del broker**: usuario `historial`, con la clave en `/etc/stc1000-historial.env`
   (root:stc1000-historial, 0640). No está en el repo.
 

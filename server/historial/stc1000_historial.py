@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # Guarda en SQLite el historial que publica el ESP32 (stc1000/historial, 24 h cada 5 min)
 # y publica retenido stc1000/historial_largo con los ultimos 30 dias.
+# La base es una ventana movil: se borra lo de mas de 31 dias y una vez por dia se
+# compacta el archivo (VACUUM), asi no crece sin fin.
 #
 # Formato de los dos topicos: {"paso_s":300,"fin":<epoch UTC>,"t":[...]}
 # La muestra i tiene timestamp fin-(len-1-i)*paso_s. Los null no se guardan.
@@ -32,8 +34,9 @@ T_ENTRADA = f"{BASE}/historial"
 T_SALIDA = f"{BASE}/historial_largo"
 PASO_S = 300
 VENTANA = 30 * 24 * 3600 // PASO_S       # 8640 muestras = 30 dias
-RETENCION_S = 400 * 24 * 3600            # se guarda algo mas de 1 anio
+RETENCION_S = 31 * 24 * 3600             # ventana movil: lo mas viejo se borra
 CADA_S = 300                             # publicar cada 5 min
+VACUUM_CADA_S = 24 * 3600                # compactar el archivo una vez por dia
 
 log = logging.getLogger("stc1000-historial")
 lock = threading.Lock()
@@ -58,9 +61,20 @@ def guardar(db, payload):
     with lock:
         # mismo timestamp: gana el valor mas nuevo
         db.executemany("INSERT OR REPLACE INTO muestras (ts, temp) VALUES (?, ?)", filas)
-        db.execute("DELETE FROM muestras WHERE ts < ?", (int(time.time()) - RETENCION_S,))
         db.commit()
     return len(filas)
+
+
+def podar(db, compactar=False):
+    """Borra lo de mas de 31 dias; con compactar, achica el archivo (VACUUM)."""
+    with lock:
+        n = db.execute("DELETE FROM muestras WHERE ts < ?", (int(time.time()) - RETENCION_S,)).rowcount
+        db.commit()
+        if compactar:
+            db.execute("VACUUM")
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    if n or compactar:
+        log.info("poda: %d muestras viejas borradas%s", n, ", archivo compactado" if compactar else "")
 
 
 def armar_largo(db):
@@ -94,6 +108,8 @@ def publicar(cli, db):
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     db = abrir_db()
+    podar(db, compactar=True)
+    ultimo_vacuum = time.monotonic()
 
     def on_connect(cli, userdata, flags, rc, props):
         log.info("conectado a %s:%d (rc=%s)", HOST, PORT, rc)
@@ -123,6 +139,10 @@ def main():
 
     while True:
         time.sleep(CADA_S)
+        compactar = time.monotonic() - ultimo_vacuum >= VACUUM_CADA_S
+        podar(db, compactar)
+        if compactar:
+            ultimo_vacuum = time.monotonic()
         if cli.is_connected():
             publicar(cli, db)
 
