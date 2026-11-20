@@ -78,9 +78,11 @@ const uint8_t  MAX_ARRANQUES_SIN_CONFIRMAR = 3;         // despues de esto, roll
 const uint32_t CONFIRMAR_TRAS_MS = 2UL * 60 * 1000;     // el firmware nuevo se confirma si publico y lleva 2 min
 
 // La ESP32-C3 Super Mini tiene una antena mala y muchas no conectan con la
-// potencia maxima. 1 = baja la potencia a 8,5 dBm (suele arreglarlo).
-#ifndef TX_POWER_REDUCIDA
-#define TX_POWER_REDUCIDA 1
+// potencia maxima, pero con 8,5 dBm las descargas largas (OTA) se traban.
+// Potencia por defecto, en cuartos de dBm (60 = 15 dBm); se cambia por serie con
+// "set tx_dbm 11" y queda en la flash.
+#ifndef TX_CUARTOS_DBM
+#define TX_CUARTOS_DBM 60
 #endif
 
 const uint8_t PIN_GPIO[7] = {5, 6, 7, 4, 3, 10, 20};  // patas 1..7 del display
@@ -124,6 +126,7 @@ struct Lectura {
 struct Config {
   String ssid, pass, mqttHost, mqttUser, mqttPass, prefijo;
   uint16_t mqttPort = 1883;
+  uint8_t  txCuartos = TX_CUARTOS_DBM;   // potencia WiFi en cuartos de dBm (8..80)
 };
 Config cfg;
 
@@ -137,6 +140,7 @@ static void cargarConfig() {
   cfg.mqttUser = p.getString("muser", "");
   cfg.mqttPass = p.getString("mpass", "");
   cfg.prefijo  = p.getString("pref", "stc1000");
+  cfg.txCuartos = constrain(p.getUChar("txq", TX_CUARTOS_DBM), 8, 80);
   p.end();
 }
 
@@ -150,6 +154,7 @@ static void guardarConfig() {
   p.putString("muser", cfg.mqttUser);
   p.putString("mpass", cfg.mqttPass);
   p.putString("pref", cfg.prefijo);
+  p.putUChar("txq", cfg.txCuartos);
   p.end();
 }
 
@@ -867,6 +872,7 @@ static void modoConfig() {
                 cfg.ssid.c_str(), cfg.pass.length() ? "(oculta)" : "(vacia)",
                 cfg.mqttHost.c_str(), cfg.mqttPort, cfg.mqttUser.c_str(),
                 cfg.mqttPass.length() ? "(oculta)" : "(vacia)", cfg.prefijo.c_str());
+  Serial.printf("tx_dbm=%.2f\n", cfg.txCuartos / 4.0f);
 }
 
 static void comandoSet(const String& resto) {
@@ -880,7 +886,8 @@ static void comandoSet(const String& resto) {
   else if (clave == "mqtt_user") cfg.mqttUser = valor;
   else if (clave == "mqtt_pass") cfg.mqttPass = valor;
   else if (clave == "prefijo")   cfg.prefijo = valor.length() ? valor : String("stc1000");
-  else { Serial.println("Clave desconocida (ssid, pass, mqtt_host, mqtt_port, mqtt_user, mqtt_pass, prefijo)"); return; }
+  else if (clave == "tx_dbm")    cfg.txCuartos = constrain((int)lroundf(valor.toFloat() * 4), 8, 80);
+  else { Serial.println("Clave desconocida (ssid, pass, mqtt_host, mqtt_port, mqtt_user, mqtt_pass, prefijo, tx_dbm)"); return; }
   guardarConfig();
   Serial.println("Guardado. Escribi 'reboot' para aplicar.");
 }
@@ -937,10 +944,11 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("stc1000");
   WiFi.setAutoReconnect(true);
+  // Sin ahorro de energia: el equipo va enchufado, y el modem sleep traba las
+  // descargas TCP largas (el OTA se frenaba a los ~96 KB)
+  WiFi.setSleep(false);
   if (cfg.ssid.length()) WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
-#if TX_POWER_REDUCIDA
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
-#endif
+  WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
   tWifiPerdido = millis() | 1;
 
   // Hora por NTP (UTC): para el historial

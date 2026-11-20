@@ -56,7 +56,7 @@
    Hace falta `include/secrets.h` en la PC que lo grabe (ver CLAUDE.md).
 2. **Verificar que el ESP32 se conecte al WiFi de 2,4 GHz.** El SSID termina en un espacio. El
    server no la veía en su escaneo (puede ser porque su placa está en 5 GHz). Comprobar con `s`
-   por el monitor serie; si no conecta, probar `TX_POWER_REDUCIDA` y revisar el SSID.
+   por el monitor serie; si no conecta, probar otra potencia con `set tx_dbm 8.5` (por defecto 15) y revisar el SSID.
 3. **Verificar MQTT punta a punta**: `mosquitto_sub -t 'stc1000/#' -v` en el server, y la app en
    un celular real (nunca se probó en un dispositivo).
 4. **Instalación final con 220 V** (hardware, sin hacer):
