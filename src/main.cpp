@@ -117,6 +117,7 @@ struct Lectura {
   bool dudosa = false;   // tiene algun glifo no reconocido ('?')
   String desconocidos;   // pares activos que no estan en el mapa, ej. "+7/-5"
   uint8_t g[3] = {0, 0, 0};
+  bool indicador = false; // punto D1-D2 prendido junto con el decimal (parpadea como indicador)
 };
 
 // ---------------- Configuracion persistente (NVS) ----------------
@@ -318,9 +319,14 @@ static void decodificar(Lectura& L) {
   String txt;
   if (activo(MAPA[IDX_MENOS].an, MAPA[IDX_MENOS].ca)) txt += '-';
   txt += ch[0];
-  if (activo(MAPA[IDX_DP12].an, MAPA[IDX_DP12].ca)) txt += '.';
+  // El punto D1-D2 parpadea (~1 s) como indicador mientras se muestra "25.9": con el
+  // decimal D2-D3 prendido no puede ser parte del numero (el STC-1000 no pasa de 99.9).
+  bool dp12 = activo(MAPA[IDX_DP12].an, MAPA[IDX_DP12].ca);
+  bool dp23 = activo(MAPA[IDX_DP23].an, MAPA[IDX_DP23].ca);
+  L.indicador = dp12 && dp23;
+  if (dp12 && !dp23) txt += '.';
   txt += ch[1];
-  if (activo(MAPA[IDX_DP23].an, MAPA[IDX_DP23].ca)) txt += '.';
+  if (dp23) txt += '.';
   txt += ch[2];
   if (activo(MAPA[IDX_C].an, MAPA[IDX_C].ca)) txt += " C";
   L.texto = txt;
@@ -352,8 +358,9 @@ static void decodificar(Lectura& L) {
 
 // ---------------- Filtro: aceptar solo lecturas estables ----------------
 const int VENTANA_MS      = 150;  // el barrido del FMD dura ~4 ms: entran ~35 barridos
-const int IGUALES_NORMAL  = 2;    // ventanas seguidas iguales para aceptar
-const int IGUALES_DUDOSA  = 8;    // si tiene '?', pedir mucho mas (seguro es un cambio)
+const int IGUALES_NORMAL  = 3;    // ventanas seguidas iguales para aceptar (con WiFi hubo
+                                  // glifos mezclados que duraban 2 ventanas)
+const int IGUALES_DUDOSA  = 20;   // si tiene '?', tiene que durar ~3 s (si no, es un cambio)
 
 String   candidato;
 int      iguales = 0;
@@ -495,7 +502,8 @@ static void publicarInfo() {
              ",\"version\":\"" FIRMWARE_VERSION "\"" +
              ",\"reconexiones_wifi\":" + String(reconexionesWifi) +
              ",\"reconexiones_mqtt\":" + String(reconexionesMqtt) +
-             ",\"desconocidos\":\"" + (hayEstable ? estable.desconocidos : String("")) + "\"}";
+             ",\"desconocidos\":\"" + (hayEstable ? estable.desconocidos : String("")) + "\"" +
+             ",\"indicador\":" + (hayEstable && estable.indicador ? "true" : "false") + "}";
   mqtt.publish(tInfo.c_str(), j.c_str(), true);
   tPubInfo = millis();
 }
