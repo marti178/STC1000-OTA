@@ -36,7 +36,7 @@ private val RAW_TEXT = KeyboardOptions(
 )
 
 @Composable
-fun SettingsScreen(
+fun ConnectionTab(
     initial: ConnSettings,
     loaded: Boolean,
     test: TestState,
@@ -65,11 +65,9 @@ fun SettingsScreen(
     Column(
         modifier
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenHeader("Ajustes", "Conexión al server MQTT")
-
         SurfaceCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Servidor", style = MaterialTheme.typography.titleMedium)

@@ -50,6 +50,16 @@ Tocá **Probar conexión** (conecta y lee `stc1000/estado`) y después **Guardar
 
 Mensajes de error que vas a ver: «Usuario o clave incorrectos», «No se llega al server: ¿está activo Tailscale…?», «El server rechazó la conexión…», «No se encuentra el servidor…», errores de TLS. Con usuario/clave incorrectos la app **no** reintenta sola (para no ser bloqueada por fail2ban): corregí los datos o apretá *Reintentar*.
 
+## Novedades de la 2.0
+
+- **4 pestañas:** Inicio, Gráficos, Equipo y Ajustes (con submenús Conexión, Preferencias y Acerca de).
+- **Gráficos:** curva suave, banda de rango deseado, línea de promedio, marcas de mínima y máxima, resumen por día (barras mín-máx con promedio) y períodos Hoy / 24 h / 7 días / 30 días.
+- **Estadísticas:** mínima, máxima, promedio, mediana, desvío estándar, % dentro del rango y cobertura.
+- **Inicio:** tendencia de los últimos 30 min, mini gráfico de 3 h y aviso si la temperatura sale del rango deseado.
+- **Preferencias:** tema claro/oscuro/sistema, colores dinámicos, °C/°F, opciones del gráfico y rango deseado.
+- **Equipo:** calidad de señal Wi-Fi y registro de conexión (para diagnosticar).
+- **Exportar** las lecturas a CSV.
+
 ## Pantallas
 
 - **Inicio**: temperatura grande, estado del equipo (en línea / desconectado), hace cuánto llegó el último dato (en rojo si pasaron más de 15 min), texto del display si no es número (`LLL` = error de sonda, `HHH`), selector de período, gráfico táctil (tocá o arrastrá para ver valor y hora) y estadísticas: mínima y máxima con su hora, promedio y cantidad de muestras.

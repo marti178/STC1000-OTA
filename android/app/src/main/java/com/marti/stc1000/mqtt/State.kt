@@ -50,3 +50,6 @@ data class DeviceState(
     /** Cuándo (epoch s) llegó por última vez una temperatura EN VIVO (no retenida). */
     val lastLiveAtSec: Long? = null,
 )
+
+/** Una línea del registro de conexión (solo en memoria, para diagnóstico). */
+data class LogEntry(val ts: Long, val text: String, val isError: Boolean = false)

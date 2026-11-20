@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.marti.stc1000.data.PrefsStore
 import com.marti.stc1000.data.SettingsStore
 import com.marti.stc1000.mqtt.MqttRepository
 
@@ -12,10 +13,13 @@ class Stc1000App : Application() {
         private set
     lateinit var settings: SettingsStore
         private set
+    lateinit var prefs: PrefsStore
+        private set
 
     override fun onCreate() {
         super.onCreate()
         settings = SettingsStore(this)
+        prefs = PrefsStore(this)
         repository = MqttRepository(this)
 
         // Conectado solo mientras la app está a la vista (en segundo plano Android igual cortaría el socket).

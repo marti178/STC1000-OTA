@@ -1,10 +1,15 @@
 package com.marti.stc1000.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -22,9 +27,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.marti.stc1000.domain.Format
 import com.marti.stc1000.mqtt.ConnectionState
 import com.marti.stc1000.mqtt.DeviceInfo
 
@@ -65,7 +74,6 @@ fun DeviceScreen(
                     add("Estado" to when (d.online) { true -> "En línea"; false -> "Desconectado"; null -> "Desconocido" })
                     add("Firmware" to (d.firmware ?: info?.version ?: "—"))
                     add("Dirección IP" to (info?.ip ?: "—"))
-                    add("Señal Wi-Fi" to (info?.rssi?.let { "$it dBm · ${signalQuality(it)}" } ?: "—"))
                     add("Encendido hace" to (info?.uptimeSec?.let { uptime(it) } ?: "—"))
                     add("Reconexiones Wi-Fi" to (info?.wifiReconnects?.toString() ?: "—"))
                     add("Reconexiones MQTT" to (info?.mqttReconnects?.toString() ?: "—"))
@@ -75,6 +83,25 @@ fun DeviceScreen(
                 rows.forEachIndexed { i, (k, v) ->
                     if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Line(k, v)
+                }
+            }
+        }
+
+        SurfaceCard {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Señal Wi-Fi del equipo", style = MaterialTheme.typography.titleMedium)
+                val rssi = info?.rssi
+                if (rssi == null) {
+                    Text("Sin datos todavía.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SignalBars(rssi)
+                        Spacer(Modifier.width(16.dp))
+                        Column {
+                            Text(signalQuality(rssi).replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("$rssi dBm", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
             }
         }
@@ -120,6 +147,35 @@ fun DeviceScreen(
                 }
             }
         }
+
+        SurfaceCard {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Registro de conexión", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Lo que hizo la app con el server desde que se abrió. Útil si algo no conecta.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (state.log.isEmpty()) {
+                    Text("Todavía no hay eventos.", style = MaterialTheme.typography.bodyMedium)
+                }
+                state.log.asReversed().take(15).forEach { e ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                        Text(
+                            Format.hour(e.ts),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.width(48.dp),
+                        )
+                        Text(
+                            e.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (e.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        }
     }
 
     pending?.let { cmd ->
@@ -149,6 +205,32 @@ private fun Line(label: String, value: String) {
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Cuatro barritas de señal, como la de un celular. */
+@Composable
+private fun SignalBars(rssi: Int) {
+    val level = when {
+        rssi >= -55 -> 4
+        rssi >= -67 -> 3
+        rssi >= -75 -> 2
+        rssi >= -85 -> 1
+        else -> 0
+    }
+    val on = if (level >= 3) MaterialTheme.status.ok else if (level == 2) MaterialTheme.status.warn else MaterialTheme.colorScheme.error
+    val off = MaterialTheme.colorScheme.outlineVariant
+    Canvas(Modifier.size(56.dp, 44.dp)) {
+        val w = size.width / 7f
+        for (i in 0 until 4) {
+            val h = size.height * (0.3f + 0.7f * (i + 1) / 4f)
+            drawRoundRect(
+                color = if (i < level) on else off,
+                topLeft = Offset(i * 2f * w, size.height - h),
+                size = Size(w * 1.3f, h),
+                cornerRadius = CornerRadius(3.dp.toPx()),
+            )
+        }
     }
 }
 

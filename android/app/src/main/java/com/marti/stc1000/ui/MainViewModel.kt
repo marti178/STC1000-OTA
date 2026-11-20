@@ -4,12 +4,16 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.marti.stc1000.Stc1000App
+import com.marti.stc1000.data.AppPrefs
 import com.marti.stc1000.data.ConnSettings
 import com.marti.stc1000.data.Sample
+import com.marti.stc1000.domain.DaySummary
 import com.marti.stc1000.domain.Period
 import com.marti.stc1000.domain.Stats
+import com.marti.stc1000.domain.Summaries
 import com.marti.stc1000.mqtt.ConnectionState
 import com.marti.stc1000.mqtt.DeviceState
+import com.marti.stc1000.mqtt.LogEntry
 import com.marti.stc1000.mqtt.MqttSupport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,11 +27,20 @@ import kotlinx.coroutines.launch
 data class MainUiState(
     val loaded: Boolean = false,
     val settings: ConnSettings = ConnSettings(),
+    val prefs: AppPrefs = AppPrefs(),
     val connection: ConnectionState = ConnectionState.Idle,
     val device: DeviceState = DeviceState(),
+    val log: List<LogEntry> = emptyList(),
     val period: Period = Period.TODAY,
+    /** Todo lo que hay en memoria (hasta 31 días). */
+    val allSamples: List<Sample> = emptyList(),
+    /** Solo las del período elegido. */
     val samples: List<Sample> = emptyList(),
     val stats: Stats? = null,
+    val inRange: Double? = null,
+    val days: List<DaySummary> = emptyList(),
+    /** Cambio de temperatura en ~30 min, en °C. */
+    val trend: Double? = null,
     val lastSample: Sample? = null,
     val nowSec: Long = System.currentTimeMillis() / 1000,
 )
@@ -50,27 +63,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private val samples = combine(period, ticker, repo.samples) { p, now, all ->
-        val from = p.startEpoch(now)
-        all.filter { it.ts >= from }
-    }
+    private data class Base(
+        val settings: ConnSettings,
+        val prefs: AppPrefs,
+        val conn: ConnectionState,
+        val device: DeviceState,
+        val log: List<LogEntry>,
+    )
+
+    private val base = combine(
+        stcApp.settings.flow, stcApp.prefs.flow, repo.connection, repo.device, repo.log,
+    ) { settings, prefs, conn, device, log -> Base(settings, prefs, conn, device, log) }
 
     val state: StateFlow<MainUiState> = combine(
-        stcApp.settings.flow, repo.connection, repo.device, period, samples,
-    ) { settings, conn, device, p, list ->
+        base, period, repo.samples, ticker,
+    ) { b, p, all, now ->
+        val list = all.filter { it.ts >= p.startEpoch(now) }
         MainUiState(
             loaded = true,
-            settings = settings,
-            connection = conn,
-            device = device,
+            settings = b.settings,
+            prefs = b.prefs,
+            connection = b.conn,
+            device = b.device,
+            log = b.log,
             period = p,
+            allSamples = all,
             samples = list,
             stats = Stats.compute(list),
-            nowSec = System.currentTimeMillis() / 1000,
+            inRange = if (b.prefs.rangeEnabled) {
+                Stats.inRangeFraction(list, b.prefs.rangeMin, b.prefs.rangeMax)
+            } else {
+                null
+            },
+            days = Summaries.byDay(list),
+            trend = Summaries.trend(all),
+            lastSample = all.lastOrNull(),
+            nowSec = now,
         )
-    }.combine(repo.samples) { ui, all -> ui.copy(lastSample = all.lastOrNull()) }
-        .combine(ticker) { ui, now -> ui.copy(nowSec = now) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     private val _test = MutableStateFlow<TestState>(TestState.Idle)
     val test: StateFlow<TestState> = _test
@@ -84,6 +114,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveSettings(s: ConnSettings) {
         viewModelScope.launch { stcApp.settings.save(s) }
+    }
+
+    fun updatePrefs(block: (AppPrefs) -> AppPrefs) {
+        viewModelScope.launch { stcApp.prefs.update(block) }
     }
 
     fun retry() = repo.retryNow()
@@ -123,5 +157,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val r = repo.sendCommand(command)
             _message.value = if (r.isSuccess) okText else "No se pudo enviar: ${r.exceptionOrNull()?.message ?: "error"}"
         }
+    }
+
+    fun toast(text: String) {
+        _message.value = text
     }
 }

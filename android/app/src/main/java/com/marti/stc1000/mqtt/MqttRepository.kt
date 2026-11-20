@@ -43,6 +43,14 @@ class MqttRepository(context: Context) {
     private val _connection = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     val connection: StateFlow<ConnectionState> = _connection
 
+    private val _log = MutableStateFlow<List<LogEntry>>(emptyList())
+    val log: StateFlow<List<LogEntry>> = _log
+
+    private fun logEvent(text: String, isError: Boolean = false) {
+        val entry = LogEntry(System.currentTimeMillis() / 1000, text, isError)
+        _log.update { (it + entry).takeLast(40) }
+    }
+
     private val _device = MutableStateFlow(DeviceState())
     val device: StateFlow<DeviceState> = _device
 
@@ -134,10 +142,12 @@ class MqttRepository(context: Context) {
         while (true) {
             if (!net.online.value) {
                 _connection.value = ConnectionState.WaitingNetwork
+                logEvent("Sin red: esperando conexión")
                 net.online.first { it }
             }
             net.kicks.tryReceive() // descarta señales viejas
             _connection.value = ConnectionState.Connecting(attempt)
+            logEvent("Conectando a ${s.host}:${s.port}" + if (s.tls) " (TLS)" else "")
 
             val dropped = CompletableDeferred<Throwable?>()
             val c = MqttSupport.buildClient(s) { cause -> dropped.complete(cause) }
@@ -151,6 +161,7 @@ class MqttRepository(context: Context) {
                 topics.forEach { MqttSupport.subscribe(c, s.topic(it)) }
                 attempt = 0
                 _connection.value = ConnectionState.Connected
+                logEvent("Conectado y suscripto")
 
                 // Conectado: esperar a que se caiga o a que cambie la red.
                 val cause = select<Throwable?> {
@@ -168,11 +179,13 @@ class MqttRepository(context: Context) {
             }
 
             if (error == null) {
+                logEvent("Cambió la red: reconectando")
                 // Cambio de red: reconectar enseguida, sin backoff.
                 attempt = 0
                 continue
             }
             attempt++
+            logEvent(error.message, isError = true)
             if (error.fatal) {
                 _connection.value = ConnectionState.Error(error.message, fatal = true, retryInSec = null)
                 net.kicks.receive() // espera un reintento manual (o un cambio de ajustes)
