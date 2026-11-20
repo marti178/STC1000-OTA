@@ -18,7 +18,7 @@ El firmware se actualiza solo desde GitHub Pages (mismo esquema que el repo del 
 - `version.txt`: **única** fuente de la versión del firmware (`scripts/version.py` la inyecta).
 - `.github/workflows/build.yml`: en cada push a `main` (que no sea solo `android/`, `server/`,
   `docs/` o `.md`) compila y publica `version.json` + `firmware.bin` en GitHub Pages.
-- `android/`: app Kotlin + Compose (HiveMQ client, Room, DataStore + Keystore). Usa `historial` y `historial_largo`.
+- `android/`: app Kotlin + Compose (HiveMQ client, DataStore + Keystore; sin base local: baja el historial del server). Usa `historial` y `historial_largo`.
 - `server/`: config de Mosquitto (sin claves), Funnel/nftables, y `server/historial/` (servicio
   que guarda el historial en SQLite y publica `stc1000/historial_largo`).
 - `docs/STC1000_ESP32_resumen.md`: relevamiento del hardware y mapa del display.

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +19,11 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.marti.stc1000.data.CsvExporter
+import com.marti.stc1000.ui.ChartIcon
 import com.marti.stc1000.ui.ChartsScreen
 import com.marti.stc1000.ui.DeviceScreen
 import com.marti.stc1000.ui.HomeScreen
@@ -69,7 +74,11 @@ class MainActivity : ComponentActivity() {
             ) {
                 // Primera vez (sin servidor configurado) se abre directo en Ajustes.
                 var tab by rememberSaveable { mutableStateOf(requestedTab) }
-                val current = tab ?: if (!state.loaded || state.settings.isConfigured) Tab.HOME else Tab.SETTINGS
+                LaunchedEffect(state.loaded, state.settings.isConfigured) {
+                    if (tab == null && state.loaded && !state.settings.isConfigured) tab = Tab.SETTINGS
+                }
+                val current = tab ?: Tab.HOME
+                val stateHolder = rememberSaveableStateHolder()
 
                 LaunchedEffect(message) {
                     message?.let {
@@ -78,12 +87,21 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val scope = rememberCoroutineScope()
                 fun export() {
-                    if (state.allSamples.isEmpty()) {
+                    val samples = state.allSamples
+                    if (samples.isEmpty()) {
                         vm.toast("Todavía no hay lecturas para exportar.")
                     } else {
-                        runCatching { context.startActivity(CsvExporter.shareIntent(context, state.allSamples)) }
-                            .onFailure { vm.toast("No se pudo abrir el menú de compartir.") }
+                        // Armar el archivo (hasta 8640 filas) fuera del hilo principal.
+                        scope.launch {
+                            val intent = runCatching {
+                                withContext(Dispatchers.IO) { CsvExporter.shareIntent(context, samples) }
+                            }.getOrNull()
+                            if (intent == null || runCatching { context.startActivity(intent) }.isFailure) {
+                                vm.toast("No se pudo abrir el menú de compartir.")
+                            }
+                        }
                     }
                 }
 
@@ -100,7 +118,7 @@ class MainActivity : ComponentActivity() {
                                         Icon(
                                             when (t) {
                                                 Tab.HOME -> Icons.Default.Home
-                                                Tab.CHARTS -> Icons.Default.Menu
+                                                Tab.CHARTS -> ChartIcon
                                                 Tab.DEVICE -> Icons.Default.Info
                                                 Tab.SETTINGS -> Icons.Default.Settings
                                             },
@@ -114,6 +132,8 @@ class MainActivity : ComponentActivity() {
                     },
                 ) { padding ->
                     val mod = Modifier.padding(padding)
+                    // Cada pestana conserva su estado (formulario, scroll) al ir y volver.
+                    stateHolder.SaveableStateProvider(current.name) {
                     when (current) {
                         Tab.HOME -> HomeScreen(state, vm::selectPeriod, vm::retry, mod)
                         Tab.CHARTS -> ChartsScreen(state, vm::selectPeriod, ::export, mod)
@@ -124,7 +144,7 @@ class MainActivity : ComponentActivity() {
                             test = test,
                             prefs = state.prefs,
                             hasData = state.allSamples.isNotEmpty(),
-                            onSave = vm::saveSettings,
+                            onSave = { s, done -> vm.saveSettings(s, done) },
                             onTest = vm::testConnection,
                             onFormChanged = vm::clearTest,
                             onPrefs = vm::updatePrefs,
@@ -132,6 +152,7 @@ class MainActivity : ComponentActivity() {
                             modifier = mod,
                             startTab = settingsSubTab,
                         )
+                    }
                     }
                 }
             }

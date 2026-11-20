@@ -57,7 +57,8 @@ object Summaries {
     /** Agrupa por día local, de más viejo a más nuevo. */
     fun byDay(samples: List<Sample>, zone: ZoneId = ZoneId.systemDefault()): List<DaySummary> =
         samples
-            .groupBy { Instant.ofEpochSecond(it.ts).atZone(zone).toLocalDate() }
+            // La muestra rotulada 00:00 es el promedio de 23:55-00:00: pertenece al dia que termina.
+            .groupBy { Instant.ofEpochSecond(it.ts - 1).atZone(zone).toLocalDate() }
             .toSortedMap()
             .map { (date, list) ->
                 DaySummary(

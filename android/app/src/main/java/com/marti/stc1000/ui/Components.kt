@@ -65,7 +65,7 @@ fun Dot(color: Color, size: Int = 8) {
 
 /** Píldora de estado de la conexión MQTT. */
 @Composable
-fun ConnectionPill(conn: ConnectionState) {
+fun ConnectionPill(conn: ConnectionState, configured: Boolean = true) {
     val st = MaterialTheme.status
     val cs = MaterialTheme.colorScheme
     val (label, dot, bg) = when (conn) {
@@ -75,7 +75,8 @@ fun ConnectionPill(conn: ConnectionState) {
         )
         ConnectionState.WaitingNetwork -> Triple("Sin red", st.warn, st.warnContainer)
         is ConnectionState.Error -> Triple("Sin conexión", cs.error, cs.errorContainer)
-        ConnectionState.Idle -> Triple("Sin configurar", cs.outline, cs.surfaceVariant)
+        ConnectionState.Idle ->
+            if (configured) Triple("Iniciando", cs.outline, cs.surfaceVariant) else Triple("Sin configurar", cs.outline, cs.surfaceVariant)
     }
     Row(
         Modifier

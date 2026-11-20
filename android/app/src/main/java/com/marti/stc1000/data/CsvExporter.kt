@@ -12,11 +12,12 @@ import java.util.Locale
 /** Exporta las lecturas que la app tiene en memoria a un CSV y abre el menú de compartir. */
 object CsvExporter {
     fun toCsv(samples: List<Sample>): String = buildString {
-        append("fecha_hora_local,epoch_utc,temperatura_c\n")
+        // Separador ';' y coma decimal: asi lo abre bien el Excel en espanol (con ',' lo mete todo en una columna).
+        append("fecha_hora_local;epoch_utc;temperatura_c\n")
         for (s in samples) {
-            append(Format.dateTimeFull(s.ts)).append(',')
-                .append(s.ts).append(',')
-                .append(String.format(Locale.US, "%.1f", s.temp)).append('\n')
+            append(Format.dateTimeFull(s.ts)).append(';')
+                .append(s.ts).append(';')
+                .append(String.format(Locale.US, "%.1f", s.temp).replace('.', ',')).append('\n')
         }
     }
 

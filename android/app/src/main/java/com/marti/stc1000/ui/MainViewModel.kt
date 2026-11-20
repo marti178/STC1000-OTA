@@ -16,7 +16,9 @@ import com.marti.stc1000.mqtt.DeviceState
 import com.marti.stc1000.mqtt.LogEntry
 import com.marti.stc1000.mqtt.MqttSupport
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -78,7 +80,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<MainUiState> = combine(
         base, period, repo.samples, ticker,
     ) { b, p, all, now ->
-        val list = all.filter { it.ts >= p.startEpoch(now) }
+        val start = p.startEpoch(now)
+        // La muestra rotulada con la hora de inicio es el promedio del intervalo ANTERIOR: no entra.
+        val list = all.filter { it.ts > start }
         MainUiState(
             loaded = true,
             settings = b.settings,
@@ -100,7 +104,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             lastSample = all.lastOrNull(),
             nowSec = now,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
+    }
+        .flowOn(Dispatchers.Default) // estadisticas y resumenes sobre miles de muestras: fuera del hilo principal
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     private val _test = MutableStateFlow<TestState>(TestState.Idle)
     val test: StateFlow<TestState> = _test
@@ -112,8 +118,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         period.value = p
     }
 
-    fun saveSettings(s: ConnSettings) {
-        viewModelScope.launch { stcApp.settings.save(s) }
+    /** [onDone] recibe true si se guardó; si falla (Keystore roto) se avisa con el snackbar. */
+    fun saveSettings(s: ConnSettings, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = runCatching { stcApp.settings.save(s) }.getOrDefault(false)
+            if (!ok) _message.value = "No se pudo guardar la contraseña de forma segura. Probá de nuevo."
+            onDone(ok)
+        }
     }
 
     fun updatePrefs(block: (AppPrefs) -> AppPrefs) {

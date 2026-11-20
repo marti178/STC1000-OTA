@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,20 +59,22 @@ fun HomeScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenHeader("Temperatura", "Termostato STC-1000") { ConnectionPill(state.connection) }
-        ProblemBanner(state.connection, onRetry)
+        ScreenHeader("Temperatura", "Termostato STC-1000") {
+            ConnectionPill(state.connection, state.settings.isConfigured)
+        }
+        ProblemBanner(state.connection, state.loaded && !state.settings.isConfigured, onRetry)
         RangeBanner(state)
         HeroCard(state)
         ChartCard(state, onPeriod)
-        StatsGrid(state.stats)
+        StatsGrid(state.stats, long = state.period == Period.LAST_7D || state.period == Period.LAST_30D)
     }
 }
 
 /** Mensaje largo de la conexión, solo cuando hay algo que explicar. */
 @Composable
-private fun ProblemBanner(conn: ConnectionState, onRetry: () -> Unit) {
+private fun ProblemBanner(conn: ConnectionState, notConfigured: Boolean, onRetry: () -> Unit) {
     val text = when (conn) {
-        ConnectionState.Idle -> "Todavía no configuraste el server. Andá a Ajustes."
+        ConnectionState.Idle -> if (notConfigured) "Todavía no configuraste el server. Andá a Ajustes." else return
         ConnectionState.WaitingNetwork -> "Sin red. Esperando conexión…"
         is ConnectionState.Error -> conn.message + (conn.retryInSec?.let { " Reintento en $it s." } ?: "")
         else -> return
@@ -101,7 +105,10 @@ private fun ProblemBanner(conn: ConnectionState, onRetry: () -> Unit) {
 private fun RangeBanner(state: MainUiState) {
     val p = state.prefs
     val t = state.device.temperature ?: state.lastSample?.temp
-    if (!p.rangeEnabled || t == null) return
+    // No se juzga el rango con un dato viejo, un display con error o sin conexion al server.
+    val ageSec = liveAgeSec(state)
+    val fresh = state.connection == ConnectionState.Connected && ageSec != null && ageSec <= STALE_AFTER_SEC
+    if (!p.rangeEnabled || t == null || !fresh || Format.displayProblem(state.device.display) != null) return
     val unit = LocalTempUnit.current
     val (text, bad) = when {
         t < p.rangeMin -> "Por debajo del rango deseado (mínimo ${Format.temp(p.rangeMin, unit)})" to true
@@ -127,20 +134,21 @@ private fun RangeBanner(state: MainUiState) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HeroCard(state: MainUiState) {
     val unit = LocalTempUnit.current
     val device = state.device
     val problem = Format.displayProblem(device.display)
     val temp = device.temperature ?: state.lastSample?.temp
-    val lastDataSec = listOfNotNull(device.lastLiveAtSec, state.lastSample?.ts).maxOrNull()
-    val ageSec = lastDataSec?.let { state.nowSec - it }
+    val ageSec = liveAgeSec(state)
     val stale = ageSec != null && ageSec > STALE_AFTER_SEC
+    val connected = state.connection == ConnectionState.Connected
     val outOfRange = state.prefs.rangeEnabled && temp != null &&
         (temp < state.prefs.rangeMin || temp > state.prefs.rangeMax)
 
     val (c1, c2) = when {
-        problem != null || device.online == false || stale -> heroColors(null)
+        problem != null || device.online == false || stale || !connected -> heroColors(null)
         outOfRange -> Color(0xFFE53935) to Color(0xFF8E1B1B)
         else -> heroColors(temp)
     }
@@ -158,7 +166,7 @@ private fun HeroCard(state: MainUiState) {
             Text(
                 "TEMPERATURA ACTUAL",
                 style = MaterialTheme.typography.labelMedium,
-                color = Color.White.copy(alpha = 0.8f),
+                color = Color.White.copy(alpha = 0.92f),
             )
             when {
                 problem != null -> Text(
@@ -206,17 +214,23 @@ private fun HeroCard(state: MainUiState) {
                 )
             }
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Sin conexion al server, el "en linea" que quedo en memoria es un dato viejo.
                 HeroChip(
-                    when (device.online) {
-                        true -> "En línea"
-                        false -> "Desconectado"
-                        null -> "Estado desconocido"
+                    when {
+                        !connected -> "Sin conexión al server"
+                        device.online == true -> "En línea"
+                        device.online == false -> "Desconectado"
+                        else -> "Estado desconocido"
                     },
-                    dot = when (device.online) {
-                        true -> Color(0xFF7CF2B4)
-                        false -> Color(0xFFFF9C94)
-                        null -> Color.White.copy(alpha = 0.6f)
+                    dot = when {
+                        !connected -> Color(0xFFFFD27A)
+                        device.online == true -> Color(0xFF7CF2B4)
+                        device.online == false -> Color(0xFFFF9C94)
+                        else -> Color.White.copy(alpha = 0.6f)
                     },
                 )
                 HeroChip(
@@ -292,7 +306,7 @@ private fun ChartCard(state: MainUiState, onPeriod: (Period) -> Unit) {
 }
 
 @Composable
-private fun StatsGrid(stats: Stats?) {
+private fun StatsGrid(stats: Stats?, long: Boolean) {
     val unit = LocalTempUnit.current
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Estadísticas del período", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 4.dp))
@@ -308,8 +322,8 @@ private fun StatsGrid(stats: Stats?) {
             return@Column
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatTile("Mínima", Format.temp(stats.min, unit), "a las ${Format.hour(stats.minTs)}", "↓", Color(0xFF2A7FD6), Modifier.weight(1f))
-            StatTile("Máxima", Format.temp(stats.max, unit), "a las ${Format.hour(stats.maxTs)}", "↑", Color(0xFFE0612B), Modifier.weight(1f))
+            StatTile("Mínima", Format.temp(stats.min, unit), whenText(stats.minTs, long), "↓", Color(0xFF2A7FD6), Modifier.weight(1f))
+            StatTile("Máxima", Format.temp(stats.max, unit), whenText(stats.maxTs, long), "↑", Color(0xFFE0612B), Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             StatTile("Promedio", Format.temp(stats.avg, unit), "del período", "≈", Color(0xFF1B8A5A), Modifier.weight(1f))
@@ -339,4 +353,17 @@ fun StatTile(label: String, value: String, sub: String, glyph: String, accent: C
             Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** Dice "a las 14:05" dentro de un dia y "20/11 14:05" cuando el periodo abarca varios. */
+private fun whenText(ts: Long, long: Boolean): String =
+    if (long) Format.dayHour(ts) else "a las ${Format.hour(ts)}"
+
+/**
+ * Hace cuantos segundos llego el ultimo dato. Usa la lectura en vivo si la hay; si no, la ultima muestra del
+ * historial (recortada a "ahora": las lecturas en vivo se rotulan al cierre de su intervalo, a futuro).
+ */
+fun liveAgeSec(state: MainUiState): Long? {
+    val at = state.device.lastLiveAtSec ?: state.lastSample?.ts?.coerceAtMost(state.nowSec)
+    return at?.let { (state.nowSec - it).coerceAtLeast(0) }
 }

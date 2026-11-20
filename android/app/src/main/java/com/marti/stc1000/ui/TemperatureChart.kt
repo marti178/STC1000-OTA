@@ -16,6 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,6 +50,38 @@ import kotlin.math.abs
 
 /** Lecturas separadas por más que esto se dibujan con un corte (no se inventan datos en los huecos). */
 private const val GAP_SEC = 900L
+
+/** Maximo de puntos que se dibujan por tramo continuo. */
+private const val MAX_POINTS_PER_SEGMENT = 600
+
+/**
+ * Reduce un tramo a unos [max] puntos conservando la forma: de cada grupo de muestras queda la minima y la
+ * maxima (en el orden en que ocurrieron), asi no se pierden los picos.
+ */
+internal fun decimate(seg: List<Sample>, max: Int): List<Sample> {
+    if (seg.size <= max) return seg
+    val groupSize = (seg.size + max / 2 - 1) / (max / 2)
+    val out = ArrayList<Sample>(max + 2)
+    var i = 0
+    while (i < seg.size) {
+        val end = minOf(i + groupSize, seg.size)
+        var lo = seg[i]
+        var hi = seg[i]
+        for (j in i until end) {
+            if (seg[j].temp < lo.temp) lo = seg[j]
+            if (seg[j].temp > hi.temp) hi = seg[j]
+        }
+        if (lo.ts <= hi.ts) {
+            out.add(lo)
+            if (hi !== lo) out.add(hi)
+        } else {
+            out.add(hi)
+            out.add(lo)
+        }
+        i = end
+    }
+    return out
+}
 
 private fun axisNumber(celsius: Double, unit: TempUnit): String = Format.number(celsius, unit)
 
@@ -88,7 +123,13 @@ fun TemperatureChart(
     val measurer = rememberTextMeasurer()
     val labelStyle = TextStyle(color = labelColor, fontSize = 11.sp)
 
-    var selected by remember(samples) { mutableStateOf<Sample?>(null) }
+    // La seleccion se guarda como timestamp y los gestos leen siempre los datos actuales: asi llegar un
+    // dato nuevo no la borra ni corta el arrastre.
+    var selectedTs by remember { mutableStateOf<Long?>(null) }
+    val selected = selectedTs?.let { ts -> samples.firstOrNull { it.ts == ts } }
+    val currentSamples by rememberUpdatedState(samples)
+    val currentStart by rememberUpdatedState(startSec)
+    val currentEnd by rememberUpdatedState(endSec)
 
     Column(modifier) {
         // Lectura de la muestra seleccionada (o ayuda), con altura fija para que no salte el layout.
@@ -132,19 +173,24 @@ fun TemperatureChart(
         val yMin = mid - span / 2 - span * 0.12
         val yMax = mid + span / 2 + span * 0.12
         val xSpan = (endSec - startSec).coerceAtLeast(1).toDouble()
-        val segments = remember(samples) { segmentsOf(samples) }
+        // Para dibujar se reducen los puntos (30 dias son 8640): el calculo de estadisticas usa todos.
+        val segments = remember(samples) { segmentsOf(samples).map { decimate(it, MAX_POINTS_PER_SEGMENT) } }
+        val description = "Gráfico de temperatura. Mínima ${Format.temp(minS.temp, unit)}, máxima " +
+            "${Format.temp(maxS.temp, unit)}, promedio ${Format.temp(avg, unit)}, ${samples.size} lecturas."
 
         Canvas(
             Modifier
                 .fillMaxWidth()
                 .height(chartHeight)
-                .pointerInput(samples, startSec, endSec) {
+                .semantics { contentDescription = description }
+                .pointerInput(Unit) {
                     val left = 44.dp.toPx()
                     val right = 8.dp.toPx()
                     val plotW = size.width - left - right
                     fun pick(x: Float) {
-                        val t = startSec + ((x - left) / plotW).coerceIn(0f, 1f) * xSpan
-                        selected = samples.minByOrNull { abs(it.ts - t) }
+                        val span = (currentEnd - currentStart).coerceAtLeast(1).toDouble()
+                        val t = currentStart + ((x - left) / plotW).coerceIn(0f, 1f) * span
+                        selectedTs = currentSamples.minByOrNull { abs(it.ts - t) }?.ts
                     }
                     awaitEachGesture {
                         val down = awaitFirstDown()

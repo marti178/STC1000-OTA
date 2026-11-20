@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,12 +85,27 @@ class MqttRepository(context: Context) {
         if (supervisor?.isActive == true) return
         net.start()
         supervisor = scope.launch {
+            var identity: List<Any>? = null
             settingsStore.flow.distinctUntilChanged().collectLatest { s ->
-                if (!s.isConfigured) {
-                    _connection.value = ConnectionState.Idle
-                } else {
-                    activeSettings = s
-                    runConnection(s)
+                // Si cambia el server o el prefijo, lo que hay en memoria es de otro equipo: se descarta.
+                val now = listOf(s.host, s.port, s.prefix, s.tls)
+                if (identity != null && identity != now) {
+                    _samples.value = emptyList()
+                    _device.value = DeviceState()
+                    stepSec = Samples.DEFAULT_STEP_SEC
+                }
+                identity = now
+                when {
+                    !s.isConfigured -> _connection.value = ConnectionState.Idle
+                    s.passwordLost -> {
+                        val msg = "La contraseña guardada no se pudo leer. Ingresala de nuevo en Ajustes."
+                        logEvent(msg, isError = true)
+                        _connection.value = ConnectionState.Error(msg, fatal = true, retryInSec = null)
+                    }
+                    else -> {
+                        activeSettings = s
+                        runConnection(s)
+                    }
                 }
             }
         }
@@ -118,14 +135,18 @@ class MqttRepository(context: Context) {
     suspend fun sendCommand(command: String): Result<Unit> {
         val c = client ?: return Result.failure(IllegalStateException("No hay conexión con el server."))
         return try {
-            c.publishWith()
-                .topic(activeSettings.topic("comando"))
-                .payload(command.toByteArray(Charsets.UTF_8))
-                .qos(MqttQos.AT_LEAST_ONCE)
-                .retain(true)
-                .send()
-                .await()
+            withTimeout(COMMAND_TIMEOUT_MS) {
+                c.publishWith()
+                    .topic(activeSettings.topic("comando"))
+                    .payload(command.toByteArray(Charsets.UTF_8))
+                    .qos(MqttQos.AT_LEAST_ONCE)
+                    .retain(true)
+                    .send()
+                    .await()
+            }
             Result.success(Unit)
+        } catch (e: TimeoutCancellationException) {
+            Result.failure(IllegalStateException("El server no confirmó el comando a tiempo."))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -135,6 +156,7 @@ class MqttRepository(context: Context) {
 
     private suspend fun runConnection(s: ConnSettings) {
         var attempt = 0
+        var lastStartMs = 0L
         // historial = últimas 24 h (lo publica el ESP32); historial_largo = hasta 30 días (lo publica el server).
         val topics = listOf(
             "estado", "temperatura", "display", "firmware", "info", "historial", "historial_largo", "ota",
@@ -145,6 +167,11 @@ class MqttRepository(context: Context) {
                 logEvent("Sin red: esperando conexión")
                 net.online.first { it }
             }
+            // Como mucho un intento cada 5 s, pase lo que pase (cambios de red, caidas rapidas): el broker
+            // permite 30 conexiones nuevas por minuto.
+            val sinceLast = System.currentTimeMillis() - lastStartMs
+            if (sinceLast < MIN_ATTEMPT_GAP_MS) delay(MIN_ATTEMPT_GAP_MS - sinceLast)
+            lastStartMs = System.currentTimeMillis()
             net.kicks.tryReceive() // descarta señales viejas
             _connection.value = ConnectionState.Connecting(attempt)
             logEvent("Conectando a ${s.host}:${s.port}" + if (s.tls) " (TLS)" else "")
@@ -153,13 +180,14 @@ class MqttRepository(context: Context) {
             val c = MqttSupport.buildClient(s) { cause -> dropped.complete(cause) }
             client = c
             var error: ConnError? = null
+            var connectedAtMs = 0L
             try {
                 c.publishes(MqttGlobalPublishFilter.ALL) { p ->
                     handleMessage(s, p.topic.toString(), String(p.payloadAsBytes, Charsets.UTF_8), p.isRetain)
                 }
                 MqttSupport.connect(c, s)
                 topics.forEach { MqttSupport.subscribe(c, s.topic(it)) }
-                attempt = 0
+                connectedAtMs = System.currentTimeMillis()
                 _connection.value = ConnectionState.Connected
                 logEvent("Conectado y suscripto")
 
@@ -178,10 +206,12 @@ class MqttRepository(context: Context) {
                 if (client === c) client = null
             }
 
+            // El backoff solo se reinicia si la conexion aguanto un rato: si conecta y se cae enseguida
+            // (ACL rota, Funnel que corta), los reintentos siguen espaciandose.
+            if (connectedAtMs != 0L && System.currentTimeMillis() - connectedAtMs >= STABLE_AFTER_MS) attempt = 0
+
             if (error == null) {
                 logEvent("Cambió la red: reconectando")
-                // Cambio de red: reconectar enseguida, sin backoff.
-                attempt = 0
                 continue
             }
             attempt++
@@ -232,7 +262,11 @@ class MqttRepository(context: Context) {
                 val h = HistoryParser.parse(text) ?: return@launch
                 stepSec = h.stepSec
                 val samples = Samples.fromHistory(h, now)
-                if (samples.isNotEmpty()) addSamples(samples, now)
+                if (samples.isNotEmpty()) {
+                    addSamples(samples, now)
+                } else if (h.values.isNotEmpty()) {
+                    logEvent("Historial ignorado: la fecha no coincide con la hora del celular (revisá el reloj)", isError = true)
+                }
             }
         }
     }
@@ -240,6 +274,9 @@ class MqttRepository(context: Context) {
     companion object {
         /** Cuánto se mantiene en memoria (el server publica 30 días). */
         private const val RETAIN_SEC = 31L * 24 * 3600
+        private const val MIN_ATTEMPT_GAP_MS = 5_000L
+        private const val STABLE_AFTER_MS = 30_000L
+        private const val COMMAND_TIMEOUT_MS = 10_000L
 
         /** 2, 4, 8, 16, 32, 60, 60... segundos, con hasta 1 s de azar para no sincronizar reintentos. */
         fun backoffSeconds(attempt: Int): Int {

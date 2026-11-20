@@ -24,9 +24,11 @@ class NetworkWatcher(context: Context) {
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             val changed = current != null && current != network
+            val wasOffline = !_online.value
             current = network
             _online.value = true
-            if (changed) kicks.trySend(Unit)
+            // Tambien cuando vuelve la red despues de un rato sin ninguna: si no, se espera al backoff.
+            if (changed || wasOffline) kicks.trySend(Unit)
         }
 
         override fun onLost(network: Network) {

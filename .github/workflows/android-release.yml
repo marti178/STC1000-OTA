@@ -65,13 +65,13 @@ jobs:
           ./gradlew --no-daemon testDebugUnitTest
 
       - name: Build APK
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon assembleRelease
 
       - name: Name the APK
         id: apk
         run: |
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          cp app/build/outputs/apk/debug/app-debug.apk "stc1000-app-${VERSION}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "stc1000-app-${VERSION}.apk"
           sha256sum "stc1000-app-${VERSION}.apk" | tee "stc1000-app-${VERSION}.apk.sha256"
           "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "stc1000-app-${VERSION}.apk" | grep "SHA-256" || true
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

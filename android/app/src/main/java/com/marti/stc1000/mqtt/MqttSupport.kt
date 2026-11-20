@@ -6,6 +6,7 @@ import com.hivemq.client.mqtt.datatypes.MqttQos
 import com.hivemq.client.mqtt.mqtt3.Mqtt3Client
 import com.hivemq.client.mqtt.mqtt3.Mqtt3AsyncClient
 import com.hivemq.client.mqtt.mqtt3.exceptions.Mqtt3ConnAckException
+import com.hivemq.client.mqtt.mqtt3.message.connect.connack.Mqtt3ConnAck
 import com.hivemq.client.mqtt.mqtt3.message.connect.connack.Mqtt3ConnAckReturnCode
 import com.marti.stc1000.data.ConnSettings
 import kotlinx.coroutines.CancellationException
@@ -18,13 +19,15 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
 
 /** Error de conexión ya traducido para el usuario. [fatal] = reintentar solo no sirve (credenciales, etc.). */
 data class ConnError(val message: String, val fatal: Boolean)
 
 object MqttSupport {
-    const val CONNECT_TIMEOUT_MS = 12_000L
+    /** Red de seguridad por encima de los timeouts del propio cliente (socket 8 s + CONNACK 10 s). */
+    const val CONNECT_TIMEOUT_MS = 20_000L
     const val KEEPALIVE_SEC = 30
 
     /** El cliente nunca se reutiliza entre conexiones: cada intento arma uno nuevo con id único. */
@@ -36,6 +39,12 @@ object MqttSupport {
             .identifier("stc1000-android-" + UUID.randomUUID().toString().take(8))
             .serverHost(s.host.trim())
             .serverPort(s.port)
+            // El cliente corta solo si el socket o el CONNACK tardan: por defecto esperaba 60 s por el CONNACK
+            // y un connect "abandonado" podia terminar conectado y sin dueno.
+            .transportConfig()
+            .socketConnectTimeout(8, TimeUnit.SECONDS)
+            .mqttConnectTimeout(10, TimeUnit.SECONDS)
+            .applyTransportConfig()
             .addDisconnectedListener { ctx -> onDisconnected(ctx.cause) }
         if (s.tls) builder.sslWithDefaultConfig()
         return builder.buildAsync()
@@ -52,12 +61,32 @@ object MqttSupport {
                 .password(s.password.toByteArray(Charsets.UTF_8))
                 .applySimpleAuth()
         }
-        val ack = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { req.send().await() }
-            ?: run {
-                client.disconnect()
-                throw SocketTimeoutException("connect timed out")
-            }
+        val future = req.send()
+        // Cancelar la corrutina NO debe cancelar el future (no cierra el canal): se espera un Deferred aparte
+        // y, si el connect se abandona, se desconecta apenas termine de conectar.
+        val result = CompletableDeferred<Mqtt3ConnAck>()
+        val abandoned = AtomicBoolean(false)
+        future.whenComplete { ack, error ->
+            if (error != null) result.completeExceptionally(error) else result.complete(ack)
+            if (error == null && abandoned.get()) disconnectQuietly(client)
+        }
+        val ack = try {
+            withTimeoutOrNull(CONNECT_TIMEOUT_MS) { result.await() }
+        } catch (e: CancellationException) {
+            abandon(future, client, abandoned)
+            throw e
+        }
+        if (ack == null) {
+            abandon(future, client, abandoned)
+            throw SocketTimeoutException("connect timed out")
+        }
         check(ack.returnCode == Mqtt3ConnAckReturnCode.SUCCESS) { "CONNACK ${ack.returnCode}" }
+    }
+
+    private fun abandon(future: java.util.concurrent.CompletableFuture<Mqtt3ConnAck>, client: Mqtt3AsyncClient, flag: AtomicBoolean) {
+        flag.set(true)
+        // Si justo termino de conectar antes de marcar el flag, se desconecta aca.
+        if (future.isDone && !future.isCompletedExceptionally) disconnectQuietly(client)
     }
 
     suspend fun subscribe(client: Mqtt3AsyncClient, topic: String) {

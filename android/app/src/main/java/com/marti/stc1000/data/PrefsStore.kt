@@ -2,6 +2,8 @@ package com.marti.stc1000.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
@@ -27,7 +29,10 @@ data class AppPrefs(
     val rangeMax: Double = 28.0,
 )
 
-private val Context.prefsDataStore: DataStore<Preferences> by preferencesDataStore(name = "prefs")
+private val Context.prefsDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "prefs",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 class PrefsStore(private val context: Context) {
     private object Keys {

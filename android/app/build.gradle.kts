@@ -13,8 +13,8 @@ android {
         applicationId = "com.marti.stc1000"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "2.0.0"
+        versionCode = 10
+        versionName = "2.0.1"
     }
 
     signingConfigs {
@@ -34,6 +34,9 @@ android {
         release {
             // HiveMQ/Netty necesitan reglas propias de R8; el APK de uso casero va sin minificar.
             isMinifyEnabled = false
+            // Se firma con la misma clave que las versiones anteriores para poder instalar encima.
+            // El APK publicado es "release" (no depurable): con "debug" se podia leer la contrasena con adb.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

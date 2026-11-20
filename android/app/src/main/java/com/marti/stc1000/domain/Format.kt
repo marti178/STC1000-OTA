@@ -20,7 +20,9 @@ object Format {
 
     /** Número con coma decimal y la cantidad de decimales pedida, ya convertido a [unit]. */
     fun number(celsius: Double, unit: TempUnit = TempUnit.C, decimals: Int = 1): String =
-        String.format(Locale.US, "%.${decimals}f", unit.convert(celsius)).replace('.', ',')
+        String.format(Locale.US, "%.${decimals}f", unit.convert(celsius))
+            .replace('.', ',')
+            .let { if (it.startsWith("-") && it.none { c -> c in '1'..'9' }) it.drop(1) else it } // sin "-0,0"
 
     fun temp(celsius: Double, unit: TempUnit = TempUnit.C): String = number(celsius, unit) + " " + unit.symbol
 

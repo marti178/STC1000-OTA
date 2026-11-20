@@ -1,23 +1,22 @@
 # App Android STC-1000
 
-App nativa (Kotlin + Jetpack Compose + Material 3) que muestra la temperatura del termostato STC-1000 leída por MQTT desde el ESP32. Incluye gráfico (Hoy / 24 h / 7 días), estadísticas, estado del equipo y comandos (`CHECK`, `OTA`, `REBOOT`).
+App nativa (Kotlin + Jetpack Compose + Material 3) que muestra la temperatura de un termostato STC-1000 leída por MQTT desde el ESP32: temperatura actual, gráficos (Hoy / 24 h / 7 días / 30 días), estadísticas, estado del equipo y comandos (`CHECK`, `OTA`, `REBOOT`).
 
 ## Cómo funciona
 
-- La app se conecta al Mosquitto de tu server casero (puerto 1883, o 8883 con TLS) con usuario y clave.
-- Desde cualquier lado, sin Tailscale en el celular: el server publica el broker por **Tailscale Funnel** (TLS, puerto 8443). Ver `server/README.md`. También se puede usar la IP de la LAN o la de Tailscale.
-- Está conectada **mientras la app está abierta** (30 s de gracia al salir). Reconecta sola con espera creciente (2, 4, 8… hasta 60 s) y reacciona a cambios de red (Wi-Fi ↔ datos).
-- **La app no guarda lecturas en el celular.** Cada vez que conecta baja el historial largo del server (retenido) y lo mantiene solo en memoria para dibujar; las lecturas en vivo se suman encima. Si cerrás la app, al abrirla vuelve a bajar todo.
-- **El historial largo lo guarda y publica el server**, no el celular: un servicio en el Debian anota cada muestra y publica retenido `<prefijo>/historial_largo` (hasta 30 días, mismo formato que `historial`). Al abrir la app llega al instante, aunque no la hayas abierto en días. La app no hace nada en segundo plano.
-- La contraseña se guarda cifrada con AES/GCM, con una clave del Android Keystore.
+- Se conecta al Mosquitto de tu server casero con usuario y clave: por **Tailscale Funnel** (TLS, puerto 8443, sin Tailscale en el celular, ver `server/README.md`) o por la LAN (puerto 1883).
+- Está conectada **mientras la app está abierta** (30 s de gracia al salir). Reconecta sola con espera creciente (2, 4, 8… hasta 60 s, y nunca más de un intento cada 5 s) y reacciona a cambios de red. Con usuario o clave incorrectos no reintenta sola; reintenta con el botón *Reintentar* o cuando cambia la red.
+- **No guarda lecturas en el celular ni hace nada en segundo plano.** El historial largo lo guarda el server (un servicio en el Debian anota cada muestra y publica retenido `<prefijo>/historial_largo`, hasta 30 días, mismo formato que `historial`). Cada vez que la app conecta lo baja y lo mantiene solo en memoria para dibujar; las lecturas en vivo se suman encima.
+- La contraseña se guarda cifrada con AES/GCM, con una clave del Android Keystore. No se copia a otro celular (`allowBackup` apagado y reglas de extracción vacías); si no se puede leer, la app lo avisa y pide escribirla de nuevo.
+- El APK publicado es un build **release** (no depurable), firmado con la misma clave que las versiones anteriores para poder instalar encima.
 
 ## Abrir el proyecto en Android Studio
 
 1. Android Studio → **File → Open** → elegí la carpeta `android/`.
-2. Esperá el *Gradle sync* (usa el wrapper incluido, Gradle 9.6; necesita internet la primera vez). Requiere JDK 17+ (el que trae Android Studio sirve) y el SDK de Android con la plataforma 37.1 (Android Studio la descarga si falta).
+2. Esperá el *Gradle sync* (usa el wrapper incluido; necesita internet la primera vez). Requiere JDK 17+ (el que trae Android Studio sirve) y el SDK de Android con la plataforma 37.1 (Android Studio la descarga si falta).
 3. Conectá el celular con depuración USB y apretá **Run ▶**.
 
-Por línea de comandos (Windows, usando el JDK de Android Studio):
+Por línea de comandos (Windows, con el JDK de Android Studio):
 
 ```
 set JAVA_HOME=C:\Program Files\Android\Android Studio\jbr
@@ -29,42 +28,32 @@ Si no existe `local.properties`, Android Studio lo crea; a mano sería `sdk.dir=
 
 ## Instalar el APK
 
-El APK de debug queda en `app/build/outputs/apk/debug/app-debug.apk`.
+Desde los *Releases* del repositorio (tags `app-vX.Y.Z`): se compila y publica solo con GitHub Actions al subir un tag. Bajá el `.apk`, abrilo y permití «instalar apps de origen desconocido». Se instala encima de la versión anterior sin perder la configuración.
 
-- Con el celular conectado: `adb install -r app/build/outputs/apk/debug/app-debug.apk`
-- O copialo al celular y abrilo (hay que permitir «instalar apps de origen desconocido» para el explorador de archivos).
+Compilado a mano: `app/build/outputs/apk/debug/app-debug.apk` (`adb install -r ...`).
 
 ## Configurar la conexión
 
-La primera vez la app abre en **Ajustes**:
+La primera vez la app abre en **Ajustes → Conexión**:
 
 | Campo | Qué poner |
 |---|---|
-| Servidor | el nombre público del Funnel (`debian.tailc89921.ts.net`), o la IP de la LAN (`192.168.x.x`) |
+| Dirección | el nombre público del Funnel (`SERVIDOR.TU-TAILNET.ts.net`), o la IP de la LAN (`192.168.x.x`) |
 | Puerto | `8443` (Funnel, con TLS) o `1883` (LAN, sin TLS) |
-| Usuario / Contraseña | los del Mosquitto (`password_file`) |
+| TLS | activado para el Funnel (certificado público válido; no sirve uno autofirmado) |
+| Usuario / Contraseña | los del Mosquitto |
 | Prefijo | `stc1000` (el mismo que el firmware) |
-| Usar TLS | solo si Mosquitto tiene un certificado válido (no sirve un autofirmado) |
 
-Tocá **Probar conexión** (conecta y lee `stc1000/estado`) y después **Guardar**. De ahí en adelante la app conecta sola al abrirla.
+Tocá **Probar conexión** y después **Guardar**. De ahí en adelante la app conecta sola al abrirla. Los campos de dirección, usuario y prefijo no tienen autocorrector y la dirección solo acepta letras sin tilde, números, puntos y guiones.
 
-Mensajes de error que vas a ver: «Usuario o clave incorrectos», «No se llega al server: ¿está activo Tailscale…?», «El server rechazó la conexión…», «No se encuentra el servidor…», errores de TLS. Con usuario/clave incorrectos la app **no** reintenta sola (para no ser bloqueada por fail2ban): corregí los datos o apretá *Reintentar*.
-
-## Novedades de la 2.0
-
-- **4 pestañas:** Inicio, Gráficos, Equipo y Ajustes (con submenús Conexión, Preferencias y Acerca de).
-- **Gráficos:** curva suave, banda de rango deseado, línea de promedio, marcas de mínima y máxima, resumen por día (barras mín-máx con promedio) y períodos Hoy / 24 h / 7 días / 30 días.
-- **Estadísticas:** mínima, máxima, promedio, mediana, desvío estándar, % dentro del rango y cobertura.
-- **Inicio:** tendencia de los últimos 30 min, mini gráfico de 3 h y aviso si la temperatura sale del rango deseado.
-- **Preferencias:** tema claro/oscuro/sistema, colores dinámicos, °C/°F, opciones del gráfico y rango deseado.
-- **Equipo:** calidad de señal Wi-Fi y registro de conexión (para diagnosticar).
-- **Exportar** las lecturas a CSV.
+Mensajes de error: «Usuario o clave incorrectos», «No se llega al server: ¿está activo Tailscale…?», «El server rechazó la conexión…», «No se encuentra el servidor…», errores de TLS. La pestaña **Equipo** tiene un *Registro de conexión* para diagnosticar.
 
 ## Pantallas
 
-- **Inicio**: temperatura grande, estado del equipo (en línea / desconectado), hace cuánto llegó el último dato (en rojo si pasaron más de 15 min), texto del display si no es número (`LLL` = error de sonda, `HHH`), selector de período, gráfico táctil (tocá o arrastrá para ver valor y hora) y estadísticas: mínima y máxima con su hora, promedio y cantidad de muestras.
-- **Equipo**: IP, señal Wi-Fi, uptime, firmware, reconexiones, progreso de OTA, y botones con confirmación: *Buscar actualización* (`CHECK`), *Forzar actualización* (`OTA`), *Reiniciar* (`REBOOT`). Se publican en `<prefijo>/comando`, retenido y QoS 1.
-- **Ajustes**: conexión.
+- **Inicio:** temperatura grande en una tarjeta que cambia de color con la temperatura (gris si el dato es viejo, hay error de sonda o no hay conexión con el server), mini gráfico de 3 h, tendencia de 30 min, aviso si sale del rango deseado, gráfico con selector de período y estadísticas (mínima y máxima con su hora, promedio, muestras).
+- **Gráficos:** gráfico grande (curva suave, banda de rango deseado, línea de promedio, marcas de mínima y máxima, táctil), resumen estadístico (mediana, desvío estándar, % en rango, cobertura), resumen por día con barras mín-máx y tabla diaria en 7 y 30 días, y exportación a CSV (separador `;`, coma decimal, para Excel en español).
+- **Equipo:** estado, firmware, IP, uptime, reconexiones, señal Wi-Fi, y botones con confirmación: *Buscar actualización* (`CHECK`), *Forzar actualización* (`OTA`), *Reiniciar* (`REBOOT`). Se publican en `<prefijo>/comando`, retenido y QoS 1.
+- **Ajustes:** *Conexión*, *Preferencias* (tema claro/oscuro/sistema, colores dinámicos, °C/°F, opciones del gráfico, rango deseado, exportar CSV) y *Acerca de*.
 
 ## Estructura
 
@@ -73,17 +62,20 @@ android/
   gradle/libs.versions.toml        catálogo de versiones
   app/src/main/java/com/marti/stc1000/
     Stc1000App.kt, MainActivity.kt
-    data/    Sample, SettingsStore (DataStore), SecretBox (Keystore AES/GCM)
-    domain/  History(Parser), Samples (redondeo/fusión), Stats, Period, Format  <- lógica pura, con tests
-    mqtt/    MqttRepository (conexión mantenida), MqttSupport (cliente HiveMQ, errores), NetworkWatcher
-    ui/      MainViewModel, HomeScreen, DeviceScreen, SettingsScreen, TemperatureChart, Theme
-  app/src/test/...                 tests unitarios (parseo, fusión/dedupe, estadísticas, formatos)
+    data/    Sample, SettingsStore (DataStore + Keystore), PrefsStore (preferencias), SecretBox (AES/GCM), CsvExporter
+    domain/  History(Parser), Samples (redondeo/fusión), Stats + Summaries (estadísticas, por día, tendencia),
+             Period, Format, Units       <- lógica pura, con tests
+    mqtt/    MqttRepository (conexión mantenida), MqttSupport (cliente HiveMQ, errores), NetworkWatcher, State
+    ui/      MainViewModel, HomeScreen, ChartsScreen, DeviceScreen, SettingsScreen (Conexión) + SettingsHost
+             (Preferencias, Acerca de), TemperatureChart (gráficos con Canvas), Components, Theme
+  app/src/test/...                 tests unitarios
 ```
 
 ## Notas y límites
 
-- Una lectura **retenida** (la que llega al conectar) se muestra pero no se suma al gráfico como muestra, porque no dice cuándo se midió; el historial real viene de `historial_largo` (y de `historial`). «Hace cuánto llegó el último dato» usa lo recibido en vivo o la última muestra del historial.
-- Si el reloj del ESP32 no está sincronizado (`fin` en 1970 o en el futuro), el `historial` se descarta.
-- Gráfico propio con Canvas (sin librería), con cortes donde faltan más de 15 min de datos.
-- `targetSdk = 36`. No se subió a 37 porque Android 17 exige un permiso en tiempo de ejecución para acceder a la red local (LAN) y no pude probarlo; con Tailscale (`100.x`) no aplica, pero para uso en LAN habría que revisarlo.
+- Una lectura **retenida** (la que llega al conectar) se muestra pero no se suma al gráfico, porque no dice cuándo se midió; el historial viene de `historial_largo` y de `historial`. «Hace cuánto llegó el último dato» usa lo recibido en vivo o la última muestra del historial.
+- Las lecturas del historial llevan la hora de **cierre** de su intervalo de 5 min (la muestra de las 00:00 es el promedio de 23:55 a 00:00): por eso «Hoy» y el resumen por día no cuentan la de las 00:00 en el día nuevo.
+- Si el reloj del ESP32 o del celular no coincide (fecha en 1970 o más de 10 min en el futuro), el historial se descarta y queda anotado en el registro de conexión.
+- Gráficos propios con Canvas (sin librería), con cortes donde faltan más de 15 min de datos y reducción de puntos para 30 días.
+- `targetSdk = 36`: Android 17 exige un permiso en tiempo de ejecución para acceder a la red local (LAN) y no se pudo probar; por Funnel no aplica.
 - El release no está minificado (HiveMQ/Netty necesitan reglas de R8 propias).

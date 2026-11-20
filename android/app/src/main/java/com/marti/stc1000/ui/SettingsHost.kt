@@ -3,6 +3,8 @@ package com.marti.stc1000.ui
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -47,7 +49,7 @@ fun SettingsScreen(
     test: TestState,
     prefs: AppPrefs,
     hasData: Boolean,
-    onSave: (ConnSettings) -> Unit,
+    onSave: (ConnSettings, (Boolean) -> Unit) -> Unit,
     onTest: (ConnSettings) -> Unit,
     onFormChanged: () -> Unit,
     onPrefs: ((AppPrefs) -> AppPrefs) -> Unit,
@@ -55,7 +57,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     startTab: Int = 0,
 ) {
-    var tab by rememberSaveable { mutableIntStateOf(startTab) }
+    var tab by rememberSaveable { mutableIntStateOf(startTab.coerceIn(0, TABS.lastIndex)) }
     Column(modifier.fillMaxSize()) {
         ScreenHeader("Ajustes", null, Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp))
         SettingsTabs(tab) { tab = it }
@@ -90,6 +92,7 @@ private fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChan
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PreferencesTab(
     prefs: AppPrefs,
@@ -108,7 +111,7 @@ private fun PreferencesTab(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Apariencia", style = MaterialTheme.typography.titleMedium)
                 Text("Tema", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ThemeMode.entries.forEach { m ->
                         FilterChip(
                             selected = prefs.theme == m,
@@ -130,7 +133,7 @@ private fun PreferencesTab(
         SurfaceCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Unidad de temperatura", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TempUnit.entries.forEach { u ->
                         FilterChip(
                             selected = prefs.unit == u,
@@ -179,7 +182,7 @@ private fun PreferencesTab(
 @Composable
 private fun RangeCard(prefs: AppPrefs, onPrefs: ((AppPrefs) -> AppPrefs) -> Unit) {
     val unit = prefs.unit
-    fun show(c: Double) = String.format(Locale.US, "%.1f", unit.convert(c))
+    fun show(c: Double) = String.format(Locale.US, "%.1f", unit.convert(c)).replace('.', ',')
     var minText by remember(unit) { mutableStateOf(show(prefs.rangeMin)) }
     var maxText by remember(unit) { mutableStateOf(show(prefs.rangeMax)) }
 

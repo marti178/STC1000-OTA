@@ -150,10 +150,11 @@ fun Stc1000Theme(
 
 /** Colores del degradé principal según la temperatura (frío -> azul, templado -> verde, caliente -> naranja/rojo). */
 fun heroColors(temp: Double?): Pair<Color, Color> = when {
+    // Tonos oscuros a proposito: el texto blanco de la tarjeta tiene que dar contraste de 4,5:1 o mas.
     temp == null -> Color(0xFF4A5B70) to Color(0xFF2E3B4B)
-    temp < 5 -> Color(0xFF1E88E5) to Color(0xFF0D47A1)
-    temp < 15 -> Color(0xFF00ACC1) to Color(0xFF00695C)
-    temp < 25 -> Color(0xFF2E9E6B) to Color(0xFF14694A)
-    temp < 32 -> Color(0xFFF08A24) to Color(0xFFC2511B)
-    else -> Color(0xFFE53935) to Color(0xFF8E1B1B)
+    temp < 5 -> Color(0xFF1565C0) to Color(0xFF0D47A1)
+    temp < 15 -> Color(0xFF00796B) to Color(0xFF004D40)
+    temp < 25 -> Color(0xFF2E7D32) to Color(0xFF14694A)
+    temp < 32 -> Color(0xFFBF5A0A) to Color(0xFF9A3412)
+    else -> Color(0xFFC62828) to Color(0xFF8E1B1B)
 }

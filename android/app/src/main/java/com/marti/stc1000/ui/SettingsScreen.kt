@@ -16,6 +16,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,21 +43,38 @@ fun ConnectionTab(
     initial: ConnSettings,
     loaded: Boolean,
     test: TestState,
-    onSave: (ConnSettings) -> Unit,
+    onSave: (ConnSettings, (Boolean) -> Unit) -> Unit,
     onTest: (ConnSettings) -> Unit,
     onFormChanged: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var form by remember(loaded) { mutableStateOf(initial) }
-    var portText by remember(loaded) { mutableStateOf(initial.port.toString()) }
+    // El formulario sobrevive a rotar la pantalla y a cambiar de pestana. La contrasena no se guarda en el
+    // estado de la pantalla (ver formSaver): si hace falta, se vuelve a leer de los ajustes guardados.
+    var form by rememberSaveable(stateSaver = formSaver(initial.password)) { mutableStateOf(initial) }
+    var portText by rememberSaveable { mutableStateOf(initial.port.toString()) }
+    var populated by rememberSaveable { mutableStateOf(false) }
+    var passwordTouched by rememberSaveable { mutableStateOf(false) }
     var showPassword by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+
+    // Se carga una sola vez cuando llegan los ajustes guardados.
+    LaunchedEffect(loaded) {
+        if (loaded && !populated) {
+            form = initial
+            portText = initial.port.toString()
+            populated = true
+        }
+    }
 
     val port = portText.toIntOrNull()
     val portOk = port != null && port in 1..65535
     val hostOk = form.host.isBlank() || ConnSettings.HOST_REGEX.matches(form.host.trim())
     val valid = form.host.isNotBlank() && hostOk && portOk && form.prefix.isNotBlank()
-    fun current() = form.copy(port = port ?: form.port)
+    // Si no se toco la contrasena, se conserva la guardada (no se borra por error).
+    fun current() = form.copy(
+        port = port ?: form.port,
+        password = if (!passwordTouched && form.password.isEmpty()) initial.password else form.password,
+    )
 
     fun change(block: () -> Unit) {
         block()
@@ -134,7 +154,13 @@ fun ConnectionTab(
                 )
                 OutlinedTextField(
                     value = form.password,
-                    onValueChange = { v -> change { form = form.copy(password = v) } },
+                    onValueChange = { v ->
+                        change {
+                            passwordTouched = true
+                            form = form.copy(password = v)
+                        }
+                    },
+                    isError = initial.passwordLost && !passwordTouched,
                     label = { Text("Contraseña") },
                     singleLine = true,
                     shape = MaterialTheme.shapes.medium,
@@ -143,7 +169,15 @@ fun ConnectionTab(
                     trailingIcon = {
                         TextButton(onClick = { showPassword = !showPassword }) { Text(if (showPassword) "Ocultar" else "Ver") }
                     },
-                    supportingText = { Text("Se guarda cifrada con el Keystore de Android.") },
+                    supportingText = {
+                        Text(
+                            if (initial.passwordLost && !passwordTouched) {
+                                "La contraseña guardada no se pudo leer: escribila de nuevo."
+                            } else {
+                                "Se guarda cifrada con el Keystore de Android."
+                            },
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -184,8 +218,8 @@ fun ConnectionTab(
             ) { Text("Probar conexión") }
             Button(
                 onClick = {
-                    onSave(current())
-                    saved = true
+                    saved = false
+                    onSave(current()) { ok -> saved = ok }
                 },
                 enabled = valid,
                 modifier = Modifier.weight(1f),
@@ -210,3 +244,20 @@ private fun StatusMessage(text: String, container: androidx.compose.ui.graphics.
         Text(text, Modifier.fillMaxWidth().padding(16.dp), style = MaterialTheme.typography.bodyMedium)
     }
 }
+
+/** Guarda el formulario en el estado de la pantalla SIN la contrasena (nunca va a un Bundle). */
+private fun formSaver(passwordFallback: String) = Saver<ConnSettings, Any>(
+    save = { listOf(it.host, it.port, it.username, it.prefix, it.tls) },
+    restore = {
+        @Suppress("UNCHECKED_CAST")
+        val v = it as List<Any>
+        ConnSettings(
+            host = v[0] as String,
+            port = v[1] as Int,
+            username = v[2] as String,
+            prefix = v[3] as String,
+            tls = v[4] as Boolean,
+            password = passwordFallback,
+        )
+    },
+)

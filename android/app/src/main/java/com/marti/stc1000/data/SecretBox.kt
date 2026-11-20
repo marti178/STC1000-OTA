@@ -37,6 +37,13 @@ object SecretBox {
         return gen.generateKey()
     }
 
+    /** Borra la clave (por ejemplo si el Keystore quedo inconsistente); la proxima vez se crea otra. */
+    fun resetKey() {
+        runCatching {
+            KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(KEY_ALIAS)
+        }
+    }
+
     fun encrypt(plain: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key()) // el Keystore genera un IV aleatorio
