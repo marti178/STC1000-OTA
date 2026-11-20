@@ -14,8 +14,21 @@ android {
         applicationId = "com.marti.stc1000"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "1.1.2"
+    }
+
+    signingConfigs {
+        // En CI la clave de firma (siempre la misma, para poder actualizar encima) llega por STC_KEYSTORE.
+        // En local se usa la debug de Android Studio, que es la misma.
+        getByName("debug") {
+            System.getenv("STC_KEYSTORE")?.takeIf { it.isNotBlank() }?.let { path ->
+                storeFile = file(path)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
     }
 
     buildTypes {

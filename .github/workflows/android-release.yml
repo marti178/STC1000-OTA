@@ -55,8 +55,9 @@ jobs:
             echo "::error::Falta el secreto ANDROID_KEYSTORE_BASE64 (Settings > Secrets and variables > Actions)"
             exit 1
           fi
-          mkdir -p ~/.android
-          echo "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/stc.keystore"
+          echo "STC_KEYSTORE=$RUNNER_TEMP/stc.keystore" >> "$GITHUB_ENV"
+          keytool -exportcert -alias androiddebugkey -keystore "$RUNNER_TEMP/stc.keystore" -storepass android | sha256sum
 
       - name: Unit tests
         run: |
@@ -72,6 +73,7 @@ jobs:
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           cp app/build/outputs/apk/debug/app-debug.apk "stc1000-app-${VERSION}.apk"
           sha256sum "stc1000-app-${VERSION}.apk" | tee "stc1000-app-${VERSION}.apk.sha256"
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "stc1000-app-${VERSION}.apk" | grep "SHA-256" || true
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
