@@ -211,7 +211,9 @@ private fun ChartCard(state: MainUiState, onPeriod: (Period) -> Unit) {
             TemperatureChart(
                 samples = state.samples,
                 startSec = state.period.startEpoch(state.nowSec),
-                endSec = state.nowSec,
+                // Las lecturas en vivo se guardan al cierre de su intervalo de 5 min (puede ser unos
+                // minutos a futuro); el eje X tiene que llegar hasta ahí o el último punto se aplasta.
+                endSec = maxOf(state.nowSec, state.samples.lastOrNull()?.ts ?: 0L),
             )
         }
     }
