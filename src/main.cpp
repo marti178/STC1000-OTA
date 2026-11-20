@@ -606,16 +606,31 @@ static bool versionMasNueva(const String& nueva, const String& actual) {
 
 // GitHub Pages es HTTPS. No se valida el certificado (no hay CA en el firmware);
 // la integridad del binario la garantiza el SHA-256 de version.json.
+// Con senal debil el saludo TLS tarda mas que los 5 s por defecto de HTTPClient.
+static void prepararHttp(WiFiClientSecure& cli, HTTPClient& http) {
+  cli.setInsecure();
+  cli.setHandshakeTimeout(30);
+  http.setConnectTimeout(20000);
+  http.setTimeout(20000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+}
+
+// Error HTTP con el motivo de TLS si lo hay (ej. "SSL - Connection timed out")
+static void otaErrorHttp(const char* que, int code, WiFiClientSecure& cli) {
+  char e[96] = "";
+  if (code < 0) cli.lastError(e, sizeof(e));
+  otaLog("%s respondio HTTP %d %s (heap libre %u, bloque max %u)", que, code, e,
+         ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+}
+
 static bool consultarVersion(String& version, String& sha, uint32_t& tam) {
   WiFiClientSecure cli;
-  cli.setInsecure();
   HTTPClient http;
-  http.setTimeout(15000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  prepararHttp(cli, http);
   if (!http.begin(cli, OTA_URL_VERSION)) { otaLog("no pude abrir la URL de version"); return false; }
   int code = http.GET();
   if (code != 200) {
-    otaLog("version.json respondio HTTP %d", code);
+    otaErrorHttp("version.json", code, cli);
     http.end();
     return false;
   }
@@ -633,13 +648,11 @@ static bool consultarVersion(String& version, String& sha, uint32_t& tam) {
 static bool descargarFirmware(const String& shaEsperado, uint32_t tamEsperado) {
   if (shaEsperado.length() != 64) { otaLog("version.json sin sha256 valido, cancelado"); return false; }
   WiFiClientSecure cli;
-  cli.setInsecure();
   HTTPClient http;
-  http.setTimeout(15000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  prepararHttp(cli, http);
   if (!http.begin(cli, OTA_URL_BIN)) { otaLog("no pude abrir la URL del firmware"); return false; }
   int code = http.GET();
-  if (code != 200) { otaLog("firmware.bin respondio HTTP %d", code); http.end(); return false; }
+  if (code != 200) { otaErrorHttp("firmware.bin", code, cli); http.end(); return false; }
   int total = http.getSize();
   if (total <= 0 || (tamEsperado && (uint32_t)total != tamEsperado)) {
     otaLog("tamano inesperado (%d)", total);
@@ -674,7 +687,11 @@ static bool descargarFirmware(const String& shaEsperado, uint32_t tamEsperado) {
         otaLog("%d%%", pct);
       }
     } else {
-      if (!s->connected() || millis() - tUltimoDato > 20000) { otaLog("se corto la descarga"); ok = false; break; }
+      if (!s->connected() || millis() - tUltimoDato > 20000) {
+        otaLog("se corto la descarga en %d de %d bytes", escrito, total);
+        ok = false;
+        break;
+      }
       delay(5);
     }
   }
@@ -711,7 +728,12 @@ static void buscarActualizacion(bool forzar) {
     Serial.printf("OTA: version actual %s, en GitHub %s\n", FIRMWARE_VERSION, version.c_str());
     if (forzar || versionMasNueva(version, FIRMWARE_VERSION)) {
       otaLog("actualizando %s -> %s", FIRMWARE_VERSION, version.c_str());
-      descargarFirmware(sha, tam);   // si sale bien reinicia y no vuelve
+      // si sale bien reinicia y no vuelve; si se corta, reintenta desde cero
+      for (int intento = 1; intento <= 3; intento++) {
+        if (intento > 1) { otaLog("reintento %d de 3", intento); delay(3000); }
+        descargarFirmware(sha, tam);
+        if (WiFi.status() != WL_CONNECTED) break;
+      }
     } else {
       otaLog("al dia (%s)", FIRMWARE_VERSION);
     }
@@ -835,6 +857,7 @@ static void modoEstado() {
   else
     Serial.println("Todavia sin lectura estable");
   Serial.printf("Hora %s, historial %d muestras\n", horaValida() ? "sincronizada" : "SIN sincronizar", histLen);
+  Serial.printf("Heap libre %u bytes, bloque maximo %u\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   Serial.printf("Uptime %lu s, reconexiones WiFi %lu, MQTT %lu\n", (unsigned long)(millis() / 1000),
                 (unsigned long)reconexionesWifi, (unsigned long)reconexionesMqtt);
 }
