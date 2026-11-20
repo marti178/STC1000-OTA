@@ -1,0 +1,13 @@
+# ACL de Mosquitto para el termostato STC-1000.
+# "write" = publicar, "read" = suscribirse/recibir.
+
+# ESP32
+user stc1000
+topic write stc1000/#
+topic write homeassistant/#
+topic read stc1000/comando
+
+# App Android
+user celular
+topic read stc1000/#
+topic write stc1000/comando

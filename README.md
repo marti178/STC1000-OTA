@@ -69,3 +69,10 @@ lo conectado al display (el ESP32 incluido) queda a potencial de red. El ESP32 v
 caja cerrada, alimentado aparte, y **nunca** conectado por USB a una PC mientras el
 termostato esté enchufado. El FMD tiene que trabajar a 3,3 V: el ESP32-C3 no tolera
 los 5 V de la fuente original. Más detalles en `docs/`.
+
+## Broker por internet (Tailscale Funnel)
+
+Si `MQTT_PORT` es 8443 u 8883, el ESP32 se conecta con **TLS** y valida el certificado
+contra las raíces de Let's Encrypt (`include/ca_letsencrypt.h`). Para eso necesita la hora
+(NTP), así que la primera conexión espera unos segundos. Con cualquier otro puerto
+(ej. 1883 en la LAN) se conecta sin cifrar. Configuración del server en `server/`.

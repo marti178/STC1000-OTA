@@ -57,6 +57,7 @@
 #include "driver/gpio.h"
 #include "soc/gpio_reg.h"
 #include "soc/soc.h"
+#include "ca_letsencrypt.h"
 
 // secrets.h es opcional (no esta en git). Si existe, sus valores se copian a la flash.
 #if __has_include("secrets.h")
@@ -439,8 +440,13 @@ static String histJson() {
 }
 
 // ---------------- WiFi / MQTT ----------------
-WiFiClient   wifiClient;
-PubSubClient mqtt(wifiClient);
+// Puerto 8883 u 8443 = MQTT con TLS (ej. Tailscale Funnel), validando el certificado
+// contra las raices de Let's Encrypt. Cualquier otro puerto = MQTT sin cifrar (LAN).
+WiFiClient       wifiClient;
+WiFiClientSecure wifiTls;
+PubSubClient     mqtt(wifiClient);
+
+static bool mqttConTls() { return cfg.mqttPort == 8883 || cfg.mqttPort == 8443; }
 String       clientId;
 String       tEstado, tTemp, tDisplay, tInfo, tFirmware, tHist, tOta, tComando;
 
@@ -533,8 +539,16 @@ static void alRecibir(char* topic, byte* payload, unsigned int len) {
 static void conectarMqtt() {
   if (millis() < tProxMqtt) return;
   if (cfg.mqttHost.length() == 0) { tProxMqtt = millis() + 60000; return; }
-  Serial.printf("MQTT: conectando a %s:%u ...\n", cfg.mqttHost.c_str(), cfg.mqttPort);
-  feedLoopWDT();
+  bool tls = mqttConTls();
+  Serial.printf("MQTT: conectando a %s:%u%s ...\n", cfg.mqttHost.c_str(), cfg.mqttPort, tls ? " (TLS)" : "");
+  if (tls && !horaValida()) {
+    // sin hora no se puede validar la vigencia del certificado: esperar al NTP
+    Serial.println("MQTT: esperando la hora (NTP) para validar el certificado");
+    tProxMqtt = millis() + 2000;
+    return;
+  }
+  disableLoopWDT();             // el handshake TLS puede tardar varios segundos
+  mqtt.setClient(tls ? (Client&)wifiTls : (Client&)wifiClient);
   mqtt.setServer(cfg.mqttHost.c_str(), cfg.mqttPort);
   bool ok = cfg.mqttUser.length()
     ? mqtt.connect(clientId.c_str(), cfg.mqttUser.c_str(), cfg.mqttPass.c_str(), tEstado.c_str(), 1, true, "offline")
@@ -557,7 +571,7 @@ static void conectarMqtt() {
     tProxMqtt = millis() + esperaMqtt;
     esperaMqtt = min<uint32_t>(esperaMqtt * 2, 60000);
   }
-  feedLoopWDT();
+  enableLoopWDT();
 }
 
 // ---------------- OTA desde GitHub ----------------
@@ -901,6 +915,8 @@ void setup() {
   // Hora por NTP (UTC): para el historial
   configTime(0, 0, "pool.ntp.org", "time.google.com");
 
+  wifiTls.setCACert(CA_LETSENCRYPT);
+  wifiTls.setHandshakeTimeout(15);
   mqtt.setCallback(alRecibir);
   mqtt.setBufferSize(2560);      // el historial de 24 h ocupa ~1,8 KB
   mqtt.setKeepAlive(30);

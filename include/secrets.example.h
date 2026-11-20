@@ -10,8 +10,11 @@
 #define WIFI_PASS   "TU_CLAVE_WIFI"
 
 // ---- Broker MQTT (Mosquitto en el server Debian) ----
-#define MQTT_HOST   "192.168.1.10"   // IP del server en tu red (no la de Tailscale)
-#define MQTT_PORT   1883
+// Desde internet (Tailscale Funnel, con TLS): "servidor.tailnet.ts.net" y puerto 8443.
+// En la LAN, sin cifrar: la IP del server y puerto 1883.
+// Con 8443 u 8883 el firmware usa TLS automaticamente.
+#define MQTT_HOST   "servidor.tailnet.ts.net"
+#define MQTT_PORT   8443
 #define MQTT_USER   "stc1000"        // usuario creado con mosquitto_passwd
 #define MQTT_PASS   "CAMBIAR"
 #define MQTT_BASE   "stc1000"        // prefijo de los topicos
