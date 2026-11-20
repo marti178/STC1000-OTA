@@ -79,10 +79,10 @@ const uint32_t CONFIRMAR_TRAS_MS = 2UL * 60 * 1000;     // el firmware nuevo se 
 
 // La ESP32-C3 Super Mini tiene una antena mala y muchas no conectan con la
 // potencia maxima, pero con 8,5 dBm las descargas largas (OTA) se traban.
-// Potencia por defecto, en cuartos de dBm (60 = 15 dBm); se cambia por serie con
-// "set tx_dbm 11" y queda en la flash.
+// Potencia por defecto, en cuartos de dBm (44 = 11 dBm: con 15 dBm esta placa no
+// conecta); se cambia por serie con "set tx_dbm 8.5" y queda en la flash.
 #ifndef TX_CUARTOS_DBM
-#define TX_CUARTOS_DBM 60
+#define TX_CUARTOS_DBM 44
 #endif
 
 const uint8_t PIN_GPIO[7] = {5, 6, 7, 4, 3, 10, 20};  // patas 1..7 del display
@@ -725,7 +725,12 @@ uint32_t tProxOta = OTA_PRIMERA_MS;
 // forzar = true: instala aunque la version no sea mas nueva (comando OTA)
 static void buscarActualizacion(bool forzar) {
   if (WiFi.status() != WL_CONNECTED) return;
-  if (firmwarePendiente) { otaLog("firmware sin confirmar todavia, no busco otro"); return; }
+  if (firmwarePendiente) {
+    // esperar a que se confirme (o se vuelva atras) antes de instalar otro
+    Serial.println("OTA: firmware sin confirmar todavia, no busco otro");
+    tProxOta = millis() + CONFIRMAR_TRAS_MS;
+    return;
+  }
   disableLoopWDT();             // la descarga tarda mas que el watchdog de loop
   String version, sha;
   uint32_t tam = 0;
