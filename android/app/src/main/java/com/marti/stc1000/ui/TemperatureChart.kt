@@ -139,7 +139,7 @@ internal fun transformWindow(
 /**
  * Gráfico de línea con área degradada, hecho con Canvas (sin dependencias): curva suave opcional,
  * banda de rango deseado, línea de promedio, marcas de mínima y máxima, huecos reales y selección táctil.
- * Se puede hacer zoom pellizcando con dos dedos y moverse arrastrando con dos dedos. [zoomKey] vuelve a la vista
+ * Se puede hacer zoom pellizcando con dos dedos; con zoom, un dedo arrastra para moverse y tocar elige la lectura. [zoomKey] vuelve a la vista
  * completa cuando cambia (por ejemplo al elegir otro período).
  * El eje X cubre [startSec, endSec] (o la parte con zoom); el eje Y se ajusta a lo que se ve (y a la banda, si hay).
  */
@@ -190,6 +190,7 @@ fun TemperatureChart(
     val currentSamples by rememberUpdatedState(samples)
     val currentWindow by rememberUpdatedState(ViewWindow(vs, ve))
     val currentFull by rememberUpdatedState(ViewWindow(fullStart, fullEnd))
+    val currentZoomed by rememberUpdatedState(zoomed)
 
     Column(modifier) {
         // Lectura de la muestra seleccionada (o ayuda), con altura fija para que no salte el layout.
@@ -279,6 +280,7 @@ fun TemperatureChart(
                         }
                         val down = awaitFirstDown()
                         pick(down.position.x)
+                        val panMode = currentZoomed
                         var multi = false
                         var horizontal = false
                         var dx = 0f
@@ -305,7 +307,16 @@ fun TemperatureChart(
                                 dy += c.positionChange().y
                                 if (!horizontal && abs(dy) > slop && abs(dy) > abs(dx)) break
                                 if (abs(dx) > slop) horizontal = true
-                                pick(c.position.x)
+                                if (panMode) {
+                                    // Con zoom, un dedo arrastra la ventana; tocar sin mover elige la lectura.
+                                    if (horizontal) {
+                                        val w = currentWindow
+                                        val f = currentFull
+                                        zoom = transformWindow(w.start, w.end, f.start, f.end, 1f, c.positionChange().x, 0f, plotW) ?: zoom
+                                    }
+                                } else {
+                                    pick(c.position.x)
+                                }
                                 if (horizontal && c.positionChanged()) c.consume()
                             }
                         } while (event.changes.any { it.pressed })

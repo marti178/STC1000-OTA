@@ -51,7 +51,7 @@ Mensajes de error: «Usuario o clave incorrectos», «No se llega al server: ¿e
 ## Pantallas
 
 - **Inicio:** temperatura grande en una tarjeta que cambia de color con la temperatura (gris si el dato es viejo, hay error de sonda o no hay conexión con el server), mini gráfico de 3 h, tendencia de 30 min, aviso si sale del rango deseado, gráfico con selector de período y estadísticas (mínima y máxima con su hora, promedio, muestras).
-- **Gráficos:** gráfico grande (curva suave, banda de rango deseado, línea de promedio, marcas de mínima y máxima, táctil; zoom pellizcando con dos dedos y arrastre con dos dedos para moverse), resumen estadístico (mediana, desvío estándar, % en rango, cobertura), resumen por día con barras mín-máx y tabla diaria en 7 y 30 días, y exportación a CSV (separador `;`, coma decimal, para Excel en español).
+- **Gráficos:** gráfico grande (curva suave, banda de rango deseado, línea de promedio, marcas de mínima y máxima, táctil; zoom pellizcando con dos dedos; con zoom, un dedo arrastra para moverse y tocar elige la lectura), resumen estadístico (mediana, desvío estándar, % en rango, cobertura), resumen por día con barras mín-máx y tabla diaria en 7 y 30 días, y exportación a CSV (separador `;`, coma decimal, para Excel en español).
 - **Equipo:** estado, firmware, IP, uptime, reconexiones, señal Wi-Fi, y botones con confirmación: *Buscar actualización* (`CHECK`), *Forzar actualización* (`OTA`), *Reiniciar* (`REBOOT`). Se publican en `<prefijo>/comando`, retenido y QoS 1.
 - **Ajustes:** *Conexión*, *Preferencias* (tema claro/oscuro/sistema, colores dinámicos, °C/°F, opciones del gráfico, rango deseado, exportar CSV) y *Acerca de*.
 
