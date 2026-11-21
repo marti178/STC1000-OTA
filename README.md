@@ -57,7 +57,7 @@ Comandos del monitor serie: `s` (estado), `m` (matriz de pares), `r` (captura cr
 | `stc1000/info` | JSON: ip, rssi, uptime, versión, reconexiones, `tx_dbm`, `leds` (LEDs auxiliares prendidos o parpadeando) | sí |
 | `stc1000/historial` | JSON con 24 h, una muestra cada 5 min (lo publica el ESP32) | sí |
 | `stc1000/historial_largo` | mismo formato, 30 días (lo publica el server, `server/historial/`) | sí |
-| `stc1000/salidas` | JSON `{"calor":"on\|parpadea\|off","frio":...}` según los LEDs Heat y Cool; `parpadea` = esperando la demora del compresor; `frio` es `null` hasta identificar el LED Cool | sí |
+| `stc1000/salidas` | JSON `{"calor":"on\|parpadea\|off","frio":...}` según los LEDs Heat y Cool; `parpadea` = esperando la demora del compresor | sí |
 | `stc1000/ota` | avance de la actualización | no |
 | `stc1000/diag` | respuesta a `MATRIZ`: por mil de cada par del display (5 tandas de 1 s) | no |
 | `stc1000/comando` | entrada: `CHECK`, `OTA`, `REBOOT`, `MATRIZ`, `TX <dBm>` (potencia WiFi) | — |

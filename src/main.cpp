@@ -106,7 +106,7 @@ const Led MAPA[] = {
   {4,6,"signo -"},              // 23
   {6,4,"punto de grados"},      // 24
   {5,6,"C"},                    // 25
-  {6,5,"punto inf. izq."},      // 26
+  {6,5,"Cool"},                 // 26 (LED Cool a la izquierda, confirmado enfriando)
   {5,7,"punto extremo der."},   // 27
   {7,6,"punto sup. der. izq."}, // 28
   {6,7,"Heat"}                  // 29 (LED Heat a la izquierda, confirmado a 220 V)
@@ -114,7 +114,7 @@ const Led MAPA[] = {
 const int N_LEDS = sizeof(MAPA) / sizeof(MAPA[0]);
 const int IDX_DP12 = 21, IDX_DP23 = 22, IDX_MENOS = 23, IDX_C = 25;
 const int IDX_HEAT = 29;
-const int IDX_COOL = -1;   // todavia sin identificar: cuando enfrie aparece en info.leds
+const int IDX_COOL = 26;
 
 // Resultado de decodificar una ventana
 struct Lectura {
@@ -508,7 +508,7 @@ bool     publicoAlgo = false;     // para confirmar un firmware nuevo
 
 String   pubTexto;                // ultimo display publicado
 float    pubTemp = NAN;           // ultima temperatura publicada
-uint32_t tPubInfo = 0, tPubValores = 0, tPubCambio = 0;
+uint32_t tPubInfo = 0, tPubValores = 0, tPubCambio = 0, tPubSalidas = 0;
 String   pubSalidas;              // ultimo JSON de salidas publicado
 const uint32_t CAMBIO_MIN_MS = 5000;   // no publicar cambios mas seguido que esto
                                        // (en el limite, ej. 29.15, el display salta 29.1/29.2)
@@ -597,12 +597,16 @@ static void publicarValores(bool forzar) {
 
 // Que esta haciendo el termostato, segun los LEDs Heat y Cool:
 // {"calor":"on|parpadea|off","frio":"on|parpadea|off"|null}. "parpadea" = esperando la
-// demora del compresor. frio = null mientras no se sepa cual es el LED Cool.
+// demora del compresor.
 static void publicarSalidas(bool forzar) {
   if (!mqtt.connected()) return;
   String j = String("{\"calor\":\"") + auxEstado(IDX_HEAT) + "\",\"frio\":" +
              (IDX_COOL < 0 ? String("null") : "\"" + String(auxEstado(IDX_COOL)) + "\"") + "}";
   if (j == pubSalidas && !forzar) return;
+  // con un cable flojo o el display reiniciando, el estado puede saltar: no mas de un
+  // cambio cada 5 s (el retenido siempre queda con el ultimo)
+  if (!forzar && millis() - tPubSalidas < CAMBIO_MIN_MS) return;
+  tPubSalidas = millis();
   if (mqtt.publish(tSalidas.c_str(), j.c_str(), true)) pubSalidas = j;
 }
 
@@ -910,7 +914,12 @@ static void mantenerRed() {
   if (mqtt.connected()) {
     mqtt.loop();
     procesarComandoMqtt();
-    if (millis() - tPubInfo > REPUBLICAR_MS) publicarInfo();
+    if (millis() - tPubInfo > REPUBLICAR_MS) {
+      // re-afirmar "online": si hubo toma de sesion, el will del cliente viejo puede
+      // llegar despues del "online" nuevo y dejar "offline" retenido
+      mqtt.publish(tEstado.c_str(), "online", true);
+      publicarInfo();
+    }
     bool republicar = millis() - tPubValores > REPUBLICAR_MS;
     publicarValores(republicar);
     publicarSalidas(republicar);
