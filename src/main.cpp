@@ -23,6 +23,8 @@
 //                       {"paso_s":300,"fin":<epoch de la ultima muestra>,"t":[..., null, ...]}
 //  stc1000/ota          avance de la actualizacion (no retenido)
 //  stc1000/comando      ENTRADA: CHECK (buscar version nueva), OTA (forzar), REBOOT, MATRIZ
+//  stc1000/salidas      JSON {"calor":"on|parpadea|off","frio":...} segun LEDs Heat/Cool (retenido)
+//                       comando "TX <dBm>": potencia WiFi (se guarda en la flash)
 //  stc1000/diag         respuesta a MATRIZ: por mil de cada par activo (5 tandas de 1 s)
 //  + autodescubrimiento de Home Assistant (homeassistant/sensor/...)
 //
@@ -107,10 +109,12 @@ const Led MAPA[] = {
   {6,5,"punto inf. izq."},      // 26
   {5,7,"punto extremo der."},   // 27
   {7,6,"punto sup. der. izq."}, // 28
-  {6,7,"punto adicional sup. izq."} // 29
+  {6,7,"Heat"}                  // 29 (LED Heat a la izquierda, confirmado a 220 V)
 };
 const int N_LEDS = sizeof(MAPA) / sizeof(MAPA[0]);
 const int IDX_DP12 = 21, IDX_DP23 = 22, IDX_MENOS = 23, IDX_C = 25;
+const int IDX_HEAT = 29;
+const int IDX_COOL = -1;   // todavia sin identificar: cuando enfrie aparece en info.leds
 
 // Resultado de decodificar una ventana
 struct Lectura {
@@ -283,10 +287,15 @@ static void acumular(uint32_t ms) {
   }
 }
 
+// Umbral en por mil de las lecturas. Medido a 220 V (comando MATRIZ): los segmentos
+// prendidos dan 25 a 66 por mil (los grados ~120) y los "fantasmas" de las transiciones
+// entre slots del barrido llegan a 13 por mil. Con el umbral viejo (10) un fantasma del
+// LED Heat parecia el punto D1-D2 y el segmento G del ultimo digito aparecia y
+// desaparecia (27.0 <-> 27.8).
+const uint32_t UMBRAL_PM = 18;
+
 static bool activo(uint8_t an, uint8_t ca) {
-  // umbral: el par tiene que aparecer en al menos 1% de las lecturas
-  // (hay segmentos con slots cortos, de ~2% del barrido)
-  return muestras > 0 && cuenta[an][ca] * 100 >= muestras * 1;
+  return muestras > 0 && cuenta[an][ca] * 1000 >= muestras * UMBRAL_PM;
 }
 
 // ---------------- Decodificacion ----------------
@@ -385,6 +394,33 @@ static bool filtrar(const Lectura& L) {   // devuelve true si L quedo como estab
   return true;
 }
 
+// ---------------- LEDs auxiliares (Heat, Cool, Set, puntos) ----------------
+// Cada LED se clasifica en apagado / prendido / parpadea (el STC-1000 hace parpadear
+// Heat o Cool mientras espera la demora del compresor). Ventana de 3 s.
+const int AUX_INI = 21;
+const int N_AUX = N_LEDS - AUX_INI;
+const uint32_t AUX_VENTANA_MS = 3000;
+uint32_t auxVistoOn[N_AUX], auxVistoOff[N_AUX];
+
+static void auxTick() {
+  uint32_t ahora = millis();
+  for (int i = 0; i < N_AUX; i++) {
+    if (activo(MAPA[AUX_INI + i].an, MAPA[AUX_INI + i].ca)) auxVistoOn[i] = ahora | 1;
+    else auxVistoOff[i] = ahora | 1;
+  }
+}
+
+// "on", "parpadea" u "off"
+static const char* auxEstado(int idx) {
+  if (idx < AUX_INI) return "off";
+  int i = idx - AUX_INI;
+  uint32_t ahora = millis();
+  bool on  = auxVistoOn[i]  && ahora - auxVistoOn[i]  < AUX_VENTANA_MS;
+  bool off = auxVistoOff[i] && ahora - auxVistoOff[i] < AUX_VENTANA_MS;
+  if (on && off) return "parpadea";
+  return on ? "on" : "off";
+}
+
 // ---------------- Historial de 24 h ----------------
 // Una muestra cada 5 min alineada al reloj (NTP). Cada muestra es el promedio de las
 // lecturas validas de ese intervalo; si no hubo ninguna, queda null.
@@ -461,7 +497,7 @@ PubSubClient     mqtt(wifiClient);
 
 static bool mqttConTls() { return cfg.mqttPort == 8883 || cfg.mqttPort == 8443; }
 String       clientId;
-String       tEstado, tTemp, tDisplay, tInfo, tFirmware, tHist, tOta, tComando;
+String       tEstado, tTemp, tDisplay, tInfo, tFirmware, tHist, tOta, tComando, tSalidas;
 
 bool     sinWifi = true;          // no hay WiFi (al arrancar todavia no conecto)
 uint32_t tWifiPerdido = 0;        // desde cuando no hay WiFi
@@ -472,7 +508,10 @@ bool     publicoAlgo = false;     // para confirmar un firmware nuevo
 
 String   pubTexto;                // ultimo display publicado
 float    pubTemp = NAN;           // ultima temperatura publicada
-uint32_t tPubInfo = 0, tPubValores = 0;
+uint32_t tPubInfo = 0, tPubValores = 0, tPubCambio = 0;
+String   pubSalidas;              // ultimo JSON de salidas publicado
+const uint32_t CAMBIO_MIN_MS = 5000;   // no publicar cambios mas seguido que esto
+                                       // (en el limite, ej. 29.15, el display salta 29.1/29.2)
 
 // comando recibido por MQTT: se ejecuta en loop(), nunca dentro del callback
 volatile bool cmdPendiente = false;
@@ -510,7 +549,18 @@ static void publicarInfo() {
              ",\"reconexiones_wifi\":" + String(reconexionesWifi) +
              ",\"reconexiones_mqtt\":" + String(reconexionesMqtt) +
              ",\"desconocidos\":\"" + (hayEstable ? estable.desconocidos : String("")) + "\"" +
-             ",\"indicador\":" + (hayEstable && estable.indicador ? "true" : "false") + "}";
+             ",\"indicador\":" + (hayEstable && estable.indicador ? "true" : "false") +
+             ",\"tx_dbm\":" + String(cfg.txCuartos / 4.0f, 2) +
+             ",\"leds\":{";
+  bool primero = true;
+  for (int i = AUX_INI; i < N_LEDS; i++) {
+    const char* e = auxEstado(i);
+    if (strcmp(e, "off") == 0) continue;
+    if (!primero) j += ',';
+    primero = false;
+    j += "\"" + String(MAPA[i].nombre) + " +" + String(MAPA[i].an) + "/-" + String(MAPA[i].ca) + "\":\"" + e + "\"";
+  }
+  j += "}}";
   mqtt.publish(tInfo.c_str(), j.c_str(), true);
   tPubInfo = millis();
 }
@@ -528,6 +578,8 @@ static void publicarValores(bool forzar) {
   bool cambio = texto != pubTexto ||
                 (!vieja && estable.esNumero && !(estable.temp == pubTemp));
   if (!cambio && !forzar) return;
+  if (!forzar && millis() - tPubCambio < CAMBIO_MIN_MS) return;
+  tPubCambio = millis();
 
   bool ok = mqtt.publish(tDisplay.c_str(), texto.c_str(), true);
   pubTexto = texto;
@@ -541,6 +593,17 @@ static void publicarValores(bool forzar) {
   }
   if (ok) publicoAlgo = true;
   tPubValores = millis();
+}
+
+// Que esta haciendo el termostato, segun los LEDs Heat y Cool:
+// {"calor":"on|parpadea|off","frio":"on|parpadea|off"|null}. "parpadea" = esperando la
+// demora del compresor. frio = null mientras no se sepa cual es el LED Cool.
+static void publicarSalidas(bool forzar) {
+  if (!mqtt.connected()) return;
+  String j = String("{\"calor\":\"") + auxEstado(IDX_HEAT) + "\",\"frio\":" +
+             (IDX_COOL < 0 ? String("null") : "\"" + String(auxEstado(IDX_COOL)) + "\"") + "}";
+  if (j == pubSalidas && !forzar) return;
+  if (mqtt.publish(tSalidas.c_str(), j.c_str(), true)) pubSalidas = j;
 }
 
 static void alRecibir(char* topic, byte* payload, unsigned int len) {
@@ -578,6 +641,7 @@ static void conectarMqtt() {
     publicarDescubrimientoHA();
     publicarInfo();
     publicarValores(true);
+    publicarSalidas(true);
     publicarHistorial();
   } else {
     // estado 4/5 = usuario o clave incorrectos / no autorizado
@@ -786,6 +850,16 @@ static void ejecutarComando(String c) {
   c.toUpperCase();
   Serial.printf("Comando: %s\n", c.c_str());
   if (c == "MATRIZ") publicarMatriz();
+  else if (c.startsWith("TX ")) {
+    // potencia WiFi en dBm, ej. "TX 8.5"; se guarda en la flash y se aplica ya
+    float dbm = c.substring(3).toFloat();
+    if (dbm >= 2 && dbm <= 20) {
+      cfg.txCuartos = constrain((int)lroundf(dbm * 4), 8, 80);
+      guardarConfig();
+      WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
+      publicarInfo();
+    }
+  }
   else if (c == "CHECK") buscarActualizacion(false);
   else if (c == "OTA") buscarActualizacion(true);
   else if (c == "REBOOT") {
@@ -837,7 +911,9 @@ static void mantenerRed() {
     mqtt.loop();
     procesarComandoMqtt();
     if (millis() - tPubInfo > REPUBLICAR_MS) publicarInfo();
-    publicarValores(millis() - tPubValores > REPUBLICAR_MS);
+    bool republicar = millis() - tPubValores > REPUBLICAR_MS;
+    publicarValores(republicar);
+    publicarSalidas(republicar);
     if (histNuevo) publicarHistorial();
   }
 
@@ -978,6 +1054,7 @@ void setup() {
   tHist     = cfg.prefijo + "/historial";
   tOta      = cfg.prefijo + "/ota";
   tComando  = cfg.prefijo + "/comando";
+  tSalidas  = cfg.prefijo + "/salidas";
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("stc1000");
@@ -1011,6 +1088,7 @@ void loop() {
   acumular(VENTANA_MS);
   decodificar(L);
   bool cambio = filtrar(L) && (L.texto != pubTexto || verbose);
+  auxTick();
   histTick();
   if (verbose)
     Serial.printf("[%s] glifos %02X %02X %02X, %lu lecturas%s%s\n", L.texto.c_str(),
