@@ -63,7 +63,7 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         ScreenHeader("Temperatura", "Termostato STC-1000") {
-            ConnectionPill(state.connection, state.settings.isConfigured)
+            StatusPills(state)
         }
         ProblemBanner(state.connection, state.loaded && !state.settings.isConfigured, onRetry)
         OtaBanner(state)

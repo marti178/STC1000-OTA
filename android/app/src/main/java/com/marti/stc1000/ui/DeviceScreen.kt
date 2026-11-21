@@ -65,7 +65,7 @@ fun DeviceScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenHeader("Equipo", "ESP32 espía del STC-1000") { ConnectionPill(state.connection, state.settings.isConfigured) }
+        ScreenHeader("Equipo", "ESP32 espía del STC-1000") { StatusPills(state) }
 
         SurfaceCard {
             Column(Modifier.padding(16.dp)) {

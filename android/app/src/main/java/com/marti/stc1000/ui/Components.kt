@@ -63,9 +63,46 @@ fun Dot(color: Color, size: Int = 8) {
     Box(Modifier.size(size.dp).background(color, CircleShape))
 }
 
+/** Las dos píldoras del encabezado: conexión del celular con el server y estado del equipo (ESP32). */
+@Composable
+fun StatusPills(state: MainUiState) {
+    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        ConnectionPill(state.connection, state.settings.isConfigured, prefix = "Server")
+        DevicePill(state)
+    }
+}
+
+/** Píldora del equipo: lo que publica el ESP32 en `estado`. Sin conexión al server no se sabe. */
+@Composable
+fun DevicePill(state: MainUiState) {
+    val st = MaterialTheme.status
+    val cs = MaterialTheme.colorScheme
+    val known = state.connection == ConnectionState.Connected
+    val (label, dot, bg) = when {
+        !known || state.device.online == null -> Triple("—", cs.outline, cs.surfaceVariant)
+        state.device.online == true -> Triple("En línea", st.ok, st.okContainer)
+        else -> Triple("Desconectado", cs.error, cs.errorContainer)
+    }
+    PillRow("Equipo: $label", dot, bg)
+}
+
+@Composable
+private fun PillRow(text: String, dot: Color, bg: Color) {
+    Row(
+        Modifier
+            .background(bg, RoundedCornerShape(50))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Dot(dot)
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
 /** Píldora de estado de la conexión MQTT. */
 @Composable
-fun ConnectionPill(conn: ConnectionState, configured: Boolean = true) {
+fun ConnectionPill(conn: ConnectionState, configured: Boolean = true, prefix: String? = null) {
     val st = MaterialTheme.status
     val cs = MaterialTheme.colorScheme
     val (label, dot, bg) = when (conn) {
@@ -78,14 +115,5 @@ fun ConnectionPill(conn: ConnectionState, configured: Boolean = true) {
         ConnectionState.Idle ->
             if (configured) Triple("Iniciando", cs.outline, cs.surfaceVariant) else Triple("Sin configurar", cs.outline, cs.surfaceVariant)
     }
-    Row(
-        Modifier
-            .background(bg, RoundedCornerShape(50))
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Dot(dot)
-        Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
-    }
+    PillRow(if (prefix != null) "$prefix: $label" else label, dot, bg)
 }
