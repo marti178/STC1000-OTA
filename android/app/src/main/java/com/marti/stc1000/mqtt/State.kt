@@ -81,9 +81,24 @@ data class DeviceState(
     /** Cuándo (epoch s) llegó el último mensaje de OTA en vivo; sirve para ocultar el avance tras un rato. */
     val otaAtSec: Long? = null,
     val outputs: Outputs? = null,
+    /** Cuándo (epoch s) llegó algo EN VIVO del equipo (temperatura, info o salidas, no retenido). */
+    val lastSignalAtSec: Long? = null,
     /** Cuándo (epoch s) llegó por última vez una temperatura EN VIVO (no retenida). */
     val lastLiveAtSec: Long? = null,
 )
+
+/** Segundos sin señal en vivo a partir de los cuales ya no se da por seguro que el equipo está vivo. */
+const val SIGNAL_FRESH_SEC = 90L
+
+/**
+ * ¿Está el equipo en línea? El `estado` retenido puede quedar en "offline" por una carrera con el will de MQTT,
+ * así que cualquier dato en vivo reciente cuenta como prueba de vida. null = no se sabe.
+ */
+fun DeviceState.isOnline(nowSec: Long): Boolean? {
+    val signal = lastSignalAtSec
+    if (signal != null && nowSec - signal <= SIGNAL_FRESH_SEC) return true
+    return online
+}
 
 /** Una línea del registro de conexión (solo en memoria, para diagnóstico). */
 data class LogEntry(val ts: Long, val text: String, val isError: Boolean = false)

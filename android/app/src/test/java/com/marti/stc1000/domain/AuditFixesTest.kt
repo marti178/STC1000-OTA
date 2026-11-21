@@ -2,7 +2,9 @@ package com.marti.stc1000.domain
 
 import com.marti.stc1000.data.ConnSettings
 import com.marti.stc1000.data.Sample
+import com.marti.stc1000.mqtt.DeviceState
 import com.marti.stc1000.mqtt.MqttRepository
+import com.marti.stc1000.mqtt.isOnline
 import com.marti.stc1000.mqtt.MqttSupport
 import com.marti.stc1000.ui.decimate
 import org.junit.Assert.assertEquals
@@ -159,5 +161,18 @@ class OutputsTest {
     fun avanceDelOta() {
         assertEquals(42, com.marti.stc1000.mqtt.otaPercent("42%"))
         assertEquals(null, com.marti.stc1000.mqtt.otaPercent("listo, reiniciando"))
+    }
+}
+
+class DeviceOnlineTest {
+    private fun d(online: Boolean?, signal: Long?) =
+        DeviceState(online = online, lastSignalAtSec = signal)
+
+    @Test
+    fun estadoOfflineViejoPeroConDatosEnVivoEsEnLinea() {
+        assertEquals(true, d(false, 950).isOnline(1000))
+        assertEquals(false, d(false, 800).isOnline(1000))
+        assertEquals(true, d(true, null).isOnline(1000))
+        assertEquals(null, d(null, null).isOnline(1000))
     }
 }

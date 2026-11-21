@@ -42,6 +42,7 @@ import com.marti.stc1000.domain.Format
 import com.marti.stc1000.domain.Period
 import com.marti.stc1000.domain.Stats
 import com.marti.stc1000.mqtt.ConnectionState
+import com.marti.stc1000.mqtt.isOnline
 import com.marti.stc1000.mqtt.OutputState
 import com.marti.stc1000.mqtt.otaPercent
 import androidx.compose.material3.LinearProgressIndicator
@@ -174,11 +175,12 @@ private fun HeroCard(state: MainUiState) {
     val ageSec = liveAgeSec(state)
     val stale = ageSec != null && ageSec > STALE_AFTER_SEC
     val connected = state.connection == ConnectionState.Connected
+    val online = device.isOnline(state.nowSec)
     val outOfRange = state.prefs.rangeEnabled && temp != null &&
         (temp < state.prefs.rangeMin || temp > state.prefs.rangeMax)
 
     val (c1, c2) = when {
-        problem != null || device.online == false || stale || !connected -> heroColors(null)
+        problem != null || online == false || stale || !connected -> heroColors(null)
         outOfRange -> Color(0xFFE53935) to Color(0xFF8E1B1B)
         else -> heroColors(temp)
     }
@@ -252,14 +254,14 @@ private fun HeroCard(state: MainUiState) {
                 HeroChip(
                     when {
                         !connected -> "Sin conexión al server"
-                        device.online == true -> "En línea"
-                        device.online == false -> "Desconectado"
+                        online == true -> "En línea"
+                        online == false -> "Sin conexión"
                         else -> "Estado desconocido"
                     },
                     dot = when {
                         !connected -> Color(0xFFFFD27A)
-                        device.online == true -> Color(0xFF7CF2B4)
-                        device.online == false -> Color(0xFFFF9C94)
+                        online == true -> Color(0xFF7CF2B4)
+                        online == false -> Color(0xFFFF9C94)
                         else -> Color.White.copy(alpha = 0.6f)
                     },
                 )
@@ -269,7 +271,7 @@ private fun HeroCard(state: MainUiState) {
                 )
                 // Que hace el termostato: solo con datos al dia y el equipo en linea.
                 val outs = device.outputs
-                if (connected && device.online == true && outs != null) {
+                if (connected && online == true && outs != null) {
                     val text = outputsText(outs, withIdle = false)
                     if (text.isNotEmpty()) {
                         HeroChip(

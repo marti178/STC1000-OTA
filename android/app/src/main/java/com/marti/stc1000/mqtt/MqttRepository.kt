@@ -246,7 +246,11 @@ class MqttRepository(context: Context) {
                 val v = text.trim().replace(',', '.').toDoubleOrNull() ?: return
                 if (!Samples.isPlausible(v)) return
                 _device.update { d ->
-                    d.copy(temperature = v, lastLiveAtSec = if (retained) d.lastLiveAtSec else now)
+                    d.copy(
+                        temperature = v,
+                        lastLiveAtSec = if (retained) d.lastLiveAtSec else now,
+                        lastSignalAtSec = if (retained) d.lastSignalAtSec else now,
+                    )
                 }
                 // Un mensaje retenido no dice cuándo se midió: solo se guarda lo recibido en vivo.
                 if (!retained) {
@@ -259,8 +263,12 @@ class MqttRepository(context: Context) {
                 val v = text.trim()
                 if (d.firmware != null && d.firmware != v) d.copy(firmware = v, ota = null, otaAtSec = null) else d.copy(firmware = v)
             }
-            "salidas" -> Outputs.parse(text)?.let { o -> _device.update { it.copy(outputs = o) } }
-            "info" -> DeviceInfo.parse(text)?.let { i -> _device.update { it.copy(info = i) } }
+            "salidas" -> Outputs.parse(text)?.let { o ->
+                _device.update { it.copy(outputs = o, lastSignalAtSec = if (retained) it.lastSignalAtSec else now) }
+            }
+            "info" -> DeviceInfo.parse(text)?.let { i ->
+                _device.update { it.copy(info = i, lastSignalAtSec = if (retained) it.lastSignalAtSec else now) }
+            }
             // El OTA no es retenido: un retenido viejo no dice nada del momento actual.
             "ota" -> _device.update { it.copy(ota = text.trim(), otaAtSec = if (retained) it.otaAtSec else now) }
             // El historial largo puede pesar decenas de KB: se parsea y guarda fuera del hilo de red.

@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.marti.stc1000.domain.Format
 import com.marti.stc1000.mqtt.ConnectionState
+import com.marti.stc1000.mqtt.isOnline
 import com.marti.stc1000.mqtt.DeviceInfo
 
 private enum class DeviceCommand(
@@ -71,7 +72,7 @@ fun DeviceScreen(
             Column(Modifier.padding(16.dp)) {
                 Text("Estado", style = MaterialTheme.typography.titleMedium)
                 val rows = buildList {
-                    add("Estado" to when (d.online) { true -> "En línea"; false -> "Desconectado"; null -> "Desconocido" })
+                    add("Estado" to when (d.isOnline(state.nowSec)) { true -> "En línea"; false -> "Sin conexión"; null -> "Desconocido" })
                     add("Firmware" to (d.firmware ?: info?.version ?: "—"))
                     add("Dirección IP" to (info?.ip ?: "—"))
                     add("Encendido hace" to (info?.uptimeSec?.let { uptime(it) } ?: "—"))
