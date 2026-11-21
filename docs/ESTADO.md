@@ -46,7 +46,16 @@
   también borra la calibración antes de reiniciar (tras un reinicio por software la radio quedaba
   mala hasta cortar la alimentación). `info.cortes_rapidos`.
 - v1.1.3: "parpadea" solo con dos cambios del LED en 3 s.
-- **En el equipo: v1.1.3, instalado a 220 V, 8,5 dBm.** Prueba de relés (2026-11-21 01:05-01:12):
+- v1.1.4-1.1.5: **log persistente en la flash** (LittleFS, ~48 KB): cada arranque con su motivo
+  (encendido, BROWNOUT, watchdog, software...), WiFi, MQTT, autocurado y OTA. Se lee con `LOG`
+  por MQTT (`stc1000/log`) o `log` por serie. Autocurado si no asocia al WiFi.
+- v1.1.6: rehace la conexión WiFi cada 45 s sin red (al enchufar a 220 V el primer intento
+  quedaba trabado y la reconexión automática de Arduino no reintenta ciertos motivos).
+- v1.1.7: el log guarda el motivo de cada desconexión del WiFi.
+- **Potencia: 11 dBm.** Con 8,5 dBm el router no escuchaba bien al ESP32 (AUTH_EXPIRE al
+  arrancar, 42 % de pings perdidos); con 11 dBm, 3 % y sin reinicios ni brownout aunque
+  conmuten los relés (prueba 2026-11-21 23:17-23:19 UTC).
+- **En el equipo: v1.1.7, instalado a 220 V, 11 dBm.** (Antes, v1.1.3 con 8,5 dBm:) Prueba de relés (2026-11-21 01:05-01:12):
   ~6 conmutaciones sin reinicios ni cortes del MQTT; el ping tiene cortes de 1 a 5 s (hasta 22 s)
   al conmutar. El OTA a 1.1.3 se hizo con un relé conmutando y volvió solo tras reiniciar.
 - Antes (v1.0.6, en banco): **en la LAN, publicando.** OTA automático verificado dos veces
