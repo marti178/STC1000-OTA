@@ -55,6 +55,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
+#include <esp_phy_init.h>
 #include <time.h>
 #include "mbedtls/md.h"
 #include "driver/gpio.h"
@@ -509,6 +510,17 @@ uint32_t esperaMqtt = 2000;       // backoff exponencial, hasta 60 s
 uint32_t reconexionesWifi = 0, reconexionesMqtt = 0;
 bool     publicoAlgo = false;     // para confirmar un firmware nuevo
 
+// Autocurado de la radio. A 220 V se vio que, despues de un reinicio por software
+// (ej. el del OTA), la radio puede quedar mala: conecta al broker y a los ~45 s se
+// corta por keepalive, una y otra vez; cortando la alimentacion se arreglaba.
+// Cortes "rapidos" seguidos (menos de 3 min conectado):
+//   3 -> rehacer la conexion WiFi de cero
+//   6 -> borrar la calibracion de la radio guardada en NVS y reiniciar (calibra de cero)
+const uint32_t CORTE_RAPIDO_MS = 3UL * 60 * 1000;
+uint32_t tConexionMqtt = 0;
+bool     mqttEstabaConectado = false;
+uint8_t  cortesRapidos = 0;
+
 String   pubTexto;                // ultimo display publicado
 float    pubTemp = NAN;           // ultima temperatura publicada
 uint32_t tPubInfo = 0, tPubValores = 0, tPubCambio = 0, tPubSalidas = 0;
@@ -554,6 +566,7 @@ static void publicarInfo() {
              ",\"desconocidos\":\"" + (hayEstable ? estable.desconocidos : String("")) + "\"" +
              ",\"indicador\":" + (hayEstable && estable.indicador ? "true" : "false") +
              ",\"tx_dbm\":" + String(cfg.txCuartos / 4.0f, 2) +
+             ",\"cortes_rapidos\":" + String(cortesRapidos) +
              ",\"leds\":{";
   bool primero = true;
   for (int i = AUX_INI; i < N_LEDS; i++) {
@@ -641,6 +654,8 @@ static void conectarMqtt() {
   if (ok) {
     Serial.println("MQTT: conectado");
     reconexionesMqtt++;
+    tConexionMqtt = millis();
+    mqttEstabaConectado = true;
     esperaMqtt = 2000;
     mqtt.publish(tEstado.c_str(), "online", true);
     mqtt.publish(tFirmware.c_str(), FIRMWARE_VERSION, true);
@@ -826,6 +841,9 @@ static bool descargarFirmware(const String& shaEsperado, uint32_t tamEsperado) {
   if (!Update.end(true)) { otaLog("error al cerrar: %s", Update.errorString()); return false; }
 
   marcarFirmwarePendiente();   // si el nuevo no se confirma, vuelve al anterior
+  // que el arranque nuevo calibre la radio de cero: despues del reinicio por software
+  // del OTA se vio la radio quedar mala hasta cortar la alimentacion
+  esp_phy_erase_cal_data_in_nvs();
   otaLog("listo, reiniciando");
   if (mqtt.connected()) { mqtt.publish(tEstado.c_str(), "offline", true); mqtt.loop(); mqtt.disconnect(); }
   delay(500);
@@ -951,6 +969,26 @@ static void mantenerRed() {
     esperaMqtt = 2000;
   }
 
+  if (mqttEstabaConectado && !mqtt.connected()) {
+    mqttEstabaConectado = false;
+    if (millis() - tConexionMqtt < CORTE_RAPIDO_MS) cortesRapidos++;
+    else cortesRapidos = 0;
+    Serial.printf("MQTT: se corto (cortes rapidos seguidos: %u)\n", cortesRapidos);
+    if (cortesRapidos >= 6) {
+      Serial.println("Radio: borro la calibracion y reinicio");
+      esp_phy_erase_cal_data_in_nvs();
+      delay(200);
+      ESP.restart();
+    }
+    if (cortesRapidos == 3) {
+      Serial.println("Radio: rehago la conexion WiFi");
+      WiFi.disconnect(false, false);
+      delay(500);
+      WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
+      WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
+      return;
+    }
+  }
   if (!mqtt.connected()) conectarMqtt();
   if (mqtt.connected()) {
     mqtt.loop();
