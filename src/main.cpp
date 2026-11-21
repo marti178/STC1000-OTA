@@ -316,14 +316,20 @@ static void revisarRollback() {
   Preferences p;
   p.begin("ota", false);
   if (p.getUChar("pend", 0)) {
-    uint8_t boots = p.getUChar("boots", 0) + 1;
+    // Un corte de luz o una caida de tension no dicen nada del firmware: esos arranques
+    // no cuentan (solo los reinicios por software, excepcion o watchdog)
+    esp_reset_reason_t motivo = esp_reset_reason();
+    bool cuenta = motivo != ESP_RST_POWERON && motivo != ESP_RST_BROWNOUT;
+    uint8_t boots = p.getUChar("boots", 0) + (cuenta ? 1 : 0);
     if (boots > MAX_ARRANQUES_SIN_CONFIRMAR) {
       p.putUChar("pend", 0);
       p.putUChar("boots", 0);
+      p.putString("bad_ver", FIRMWARE_VERSION);   // no volver a instalarla sola
       p.end();
       const esp_partition_t* otra = esp_ota_get_next_update_partition(NULL);
       if (otra && esp_ota_set_boot_partition(otra) == ESP_OK) {
-        Serial.println("OTA: el firmware nuevo no se confirmo, volviendo al anterior");
+        logEvento("OTA: v%s no se confirmo en %u arranques, vuelvo a la anterior",
+                  FIRMWARE_VERSION, MAX_ARRANQUES_SIN_CONFIRMAR);
         delay(200);
         ESP.restart();
       }
@@ -751,8 +757,11 @@ static void publicarValores(bool forzar) {
 // demora del compresor.
 static void publicarSalidas(bool forzar) {
   if (!mqtt.connected()) return;
-  String j = String("{\"calor\":\"") + auxEstado(IDX_HEAT) + "\",\"frio\":" +
-             (IDX_COOL < 0 ? String("null") : "\"" + String(auxEstado(IDX_COOL)) + "\"") + "}";
+  // con la lectura vieja (display apagado o ilegible) no se sabe que hace: null
+  bool vieja = !hayEstable || millis() - tEstable > LECTURA_VIEJA_MS;
+  String j = vieja ? String("{\"calor\":null,\"frio\":null}")
+                   : String("{\"calor\":\"") + auxEstado(IDX_HEAT) + "\",\"frio\":\"" +
+                     auxEstado(IDX_COOL) + "\"}";
   if (j == pubSalidas && !forzar) return;
   // con un cable flojo o el display reiniciando, el estado puede saltar: no mas de un
   // cambio cada 5 s (el retenido siempre queda con el ultimo)
@@ -995,6 +1004,7 @@ static bool descargarFirmware(const String& shaEsperado, uint32_t tamEsperado) {
 }
 
 uint32_t tProxOta = OTA_PRIMERA_MS;
+uint32_t tFinOta = 0;   // fin del ultimo chequeo/descarga (bloquea el loop: no es culpa de la radio)
 
 // forzar = true: instala aunque la version no sea mas nueva (comando OTA)
 static void buscarActualizacion(bool forzar) {
@@ -1012,7 +1022,17 @@ static void buscarActualizacion(bool forzar) {
   if (!consultarVersion(version, sha, tam)) proxima = OTA_REINTENTO_MS;
   else {
     Serial.printf("OTA: version actual %s, en GitHub %s\n", FIRMWARE_VERSION, version.c_str());
-    if (forzar || versionMasNueva(version, FIRMWARE_VERSION)) {
+    String mala;
+    {
+      Preferences p;
+      p.begin("ota", true);
+      mala = p.getString("bad_ver", "");
+      p.end();
+    }
+    if (!forzar && version == mala) {
+      otaLog("v%s fue descartada por no confirmarse; no la reinstalo (usar OTA para forzar)",
+             version.c_str());
+    } else if (forzar || versionMasNueva(version, FIRMWARE_VERSION)) {
       otaLog("actualizando %s -> %s", FIRMWARE_VERSION, version.c_str());
       // si sale bien reinicia y no vuelve; si no, se reintenta en 10 min (no en 6 h)
       if (!descargarFirmware(sha, tam)) proxima = OTA_REINTENTO_MS;
@@ -1022,6 +1042,7 @@ static void buscarActualizacion(bool forzar) {
   }
   enableLoopWDT();
   tProxOta = millis() + proxima;
+  tFinOta = millis();
 }
 
 // Diagnostico remoto (con 220 V no se puede usar el USB): publica en <prefijo>/diag
@@ -1206,7 +1227,8 @@ static void mantenerRed() {
 
   if (mqttEstabaConectado && !mqtt.connected()) {
     mqttEstabaConectado = false;
-    if (millis() - tConexionMqtt < CORTE_RAPIDO_MS) cortesRapidos++;
+    if (tFinOta && millis() - tFinOta < 90000) { /* corte por el OTA: no cuenta */ }
+    else if (millis() - tConexionMqtt < CORTE_RAPIDO_MS) cortesRapidos++;
     else cortesRapidos = 0;
     logEvento("MQTT: se corto tras %lu s (estado %d, cortes rapidos seguidos %u, WiFi %s, RSSI %d)",
               (unsigned long)((millis() - tConexionMqtt) / 1000), mqtt.state(), cortesRapidos,
