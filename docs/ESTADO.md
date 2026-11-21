@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-Última actualización: 2026-11-20 (noche).
+Última actualización: 2026-11-21 (madrugada).
 
 ## Hecho y verificado
 
@@ -33,7 +33,23 @@
 - v1.0.6: corrige un reinicio falso al arrancar ("10 min sin conexión"): `millis() | 1` podía
   quedar en el futuro y la resta sin signo daba un número enorme; después de un OTA eso contaba
   como arranque sin confirmar.
-- **En el equipo: v1.0.6, en la LAN, publicando.** OTA automático verificado dos veces
+- v1.0.7: comando `MATRIZ` por MQTT (por mil de cada par en `stc1000/diag`): diagnóstico sin USB.
+- v1.0.8: umbral 1,8 % (a 220 V los "fantasmas" de las transiciones llegan a 1,3 %: con el 1 %
+  inventaban el punto D1-D2 y el segmento G del último dígito, 27.0 ↔ 27.8); tópico
+  `stc1000/salidas`; comando `TX <dBm>`; `info.leds`.
+- v1.0.9 a v1.1.1: LEDs identificados (**Heat = +6/−5, Cool = +6/−7**); republica "online" cada
+  60 s; no publica cambios más seguido que cada 5 s.
+- v1.1.0: **OTA con reanudación** (`Range: bytes=N-`, Pages responde 206): un corte del WiFi ya
+  no reinicia la descarga; si falla, reintenta en 10 min.
+- v1.1.2: **autocurado de la radio**: 3 cortes rápidos del MQTT (< 3 min conectado) → rehace el
+  WiFi; 6 → borra la calibración de la radio (`esp_phy_erase_cal_data_in_nvs`) y reinicia. El OTA
+  también borra la calibración antes de reiniciar (tras un reinicio por software la radio quedaba
+  mala hasta cortar la alimentación). `info.cortes_rapidos`.
+- v1.1.3: "parpadea" solo con dos cambios del LED en 3 s.
+- **En el equipo: v1.1.3, instalado a 220 V, 8,5 dBm.** Prueba de relés (2026-11-21 01:05-01:12):
+  ~6 conmutaciones sin reinicios ni cortes del MQTT; el ping tiene cortes de 1 a 5 s (hasta 22 s)
+  al conmutar. El OTA a 1.1.3 se hizo con un relé conmutando y volvió solo tras reiniciar.
+- Antes (v1.0.6, en banco): **en la LAN, publicando.** OTA automático verificado dos veces
   (1.0.4 → 1.0.5 y 1.0.5 → 1.0.6 con `CHECK` por MQTT): baja ~975 KB en ~36 s, reinicia, se
   confirma a los 2 min. Señal −57 a −74 dBm con 11 dBm de potencia.
 - GitHub Pages a veces falla al publicar ("Fetching artifact metadata failed"). Re-ejecutar la
@@ -66,18 +82,21 @@
 
 ## Pendiente (en orden)
 
-1. **Instalación final con 220 V** (hardware, sin hacer):
+1. **Instalación a 220 V: hecha, con cambios forzados.** La HLK-PM03 se quemó y el OB2222 murió:
+   hoy todo se alimenta con un módulo de 3,3 V y las bobinas de los relés salen del pin 5V de la
+   Super Mini (con 3,3 V no conmutan). Eso provoca microcortes del WiFi. Mejoras pendientes de
+   hardware: capacitor de 470-1000 µF en la alimentación del ESP32 y una fuente de 5 V aparte para
+   los relés. Lo que sigue es el plan original, como referencia:
    - Revisar el circuito del relé en la placa de potencia: si el transistor es NPN con emisor a
      masa, anda con 3,3 V; si es PNP a 5 V, no apagaría. Faltan fotos de los dos lados de la
      placa de potencia, del relé y del conector entre placas.
    - Alimentar la placa del display y el ESP32 con un HLK-PM03 (220 V → 3,3 V); **no** conectar el
      pin VDD que viene de la placa de potencia; unir todas las masas.
    - Caja cerrada. Nunca USB con el termostato enchufado; actualizar solo por OTA.
-2. **Un punto superior del display sin identificar.** Cuando se prenda, aparece en
+2. **Ya no:** el "punto D1-D2 que parpadea" era un fantasma del LED Cool/Heat. **Un punto superior del display sin identificar.** Cuando se prenda, aparece en
    `stc1000/info` → `desconocidos` (o con `m` por serie).
 3. Tailscale: en el panel de administración, "Disable key expiry" para el nodo del server (si no,
    vence en marzo de 2027). En el celular, la app Tailscale con la misma cuenta.
-4. Ver qué indica el punto D1-D2 que parpadea (¿demora del compresor?, ¿relé?).
 5. Detalles menores de la app: la selección del gráfico se borra con cada lectura nueva; si el
    Keystore pierde la clave, la app dice "usuario o clave incorrectos" en vez de pedirla.
 
