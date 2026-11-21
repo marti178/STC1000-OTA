@@ -44,7 +44,7 @@ pio device monitor
 ```
 
 Comandos del monitor serie: `s` (estado), `m` (matriz de pares), `r` (captura cruda),
-`v` (cada lectura), `cfg`, `set <clave> <valor>`, `check`, `ota`, `reboot`.
+`v` (cada lectura), `cfg`, `log` (log persistente), `set <clave> <valor>`, `check`, `ota`, `reboot`.
 
 ## Tópicos MQTT
 
@@ -59,8 +59,9 @@ Comandos del monitor serie: `s` (estado), `m` (matriz de pares), `r` (captura cr
 | `stc1000/historial_largo` | mismo formato, 30 días (lo publica el server, `server/historial/`) | sí |
 | `stc1000/salidas` | JSON `{"calor":"on\|parpadea\|off","frio":...}` según los LEDs Heat y Cool; `parpadea` = esperando la demora del compresor | sí |
 | `stc1000/ota` | avance de la actualización | no |
+| `stc1000/log` | respuesta a `LOG`: últimas ~6 KB del log persistente en la flash (arranques con su motivo, WiFi, MQTT, autocurado, OTA) | no |
 | `stc1000/diag` | respuesta a `MATRIZ`: por mil de cada par del display (5 tandas de 1 s) | no |
-| `stc1000/comando` | entrada: `CHECK`, `OTA`, `REBOOT`, `MATRIZ`, `TX <dBm>` (potencia WiFi) | — |
+| `stc1000/comando` | entrada: `CHECK`, `OTA`, `REBOOT`, `MATRIZ`, `LOG`, `LOGBORRAR`, `TX <dBm>` (potencia WiFi) | — |
 
 `historial`: `{"paso_s":300,"fin":<epoch UTC de la última muestra>,"t":[26.8,27.0,null,...]}`,
 de la más vieja a la más nueva; `null` = sin lectura en ese intervalo.

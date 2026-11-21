@@ -25,6 +25,7 @@
 //  stc1000/comando      ENTRADA: CHECK (buscar version nueva), OTA (forzar), REBOOT, MATRIZ
 //  stc1000/salidas      JSON {"calor":"on|parpadea|off","frio":...} segun LEDs Heat/Cool (retenido)
 //                       comando "TX <dBm>": potencia WiFi (se guarda en la flash)
+//  stc1000/log          respuesta a LOG: ultimas ~6 KB del log persistente (LOGBORRAR lo borra)
 //  stc1000/diag         respuesta a MATRIZ: por mil de cada par activo (5 tandas de 1 s)
 //  + autodescubrimiento de Home Assistant (homeassistant/sensor/...)
 //
@@ -56,6 +57,7 @@
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
 #include <esp_phy_init.h>
+#include <LittleFS.h>
 #include <time.h>
 #include "mbedtls/md.h"
 #include "driver/gpio.h"
@@ -128,6 +130,97 @@ struct Lectura {
   uint8_t g[3] = {0, 0, 0};
   bool indicador = false; // punto D1-D2 prendido junto con el decimal (parpadea como indicador)
 };
+
+// ---------------- Log persistente (flash) ----------------
+// Eventos importantes en /log.txt (particion spiffs, LittleFS). Sobrevive a reinicios y
+// cortes de luz. Al pasar LOG_MAX bytes se rota a /log1.txt (se guardan los dos).
+// Se lee con "log" por serie o con el comando LOG por MQTT (topico <prefijo>/log).
+// Pocas escrituras por hora: no gasta la flash.
+const size_t LOG_MAX = 24 * 1024;
+bool     logOk = false;
+uint32_t numArranque = 0;
+
+static void logEvento(const char* fmt, ...) {
+  char b[160];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(b, sizeof(b), fmt, ap);
+  va_end(ap);
+  char linea[220];
+  time_t t = time(nullptr);
+  if (t > 1700000000) {
+    struct tm tm;
+    gmtime_r(&t, &tm);
+    snprintf(linea, sizeof(linea), "%04d-%02d-%02d %02d:%02d:%02dZ a%lu t%lu %s\n",
+             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+             (unsigned long)numArranque, (unsigned long)(millis() / 1000), b);
+  } else {
+    snprintf(linea, sizeof(linea), "(sin hora) a%lu t%lu %s\n",
+             (unsigned long)numArranque, (unsigned long)(millis() / 1000), b);
+  }
+  Serial.print("LOG ");
+  Serial.print(linea);
+  if (!logOk) return;
+  File f = LittleFS.open("/log.txt", FILE_APPEND);
+  if (!f) return;
+  f.print(linea);
+  size_t tam = f.size();
+  f.close();
+  if (tam > LOG_MAX) {
+    LittleFS.remove("/log1.txt");
+    LittleFS.rename("/log.txt", "/log1.txt");
+  }
+}
+
+static const char* motivoArranque() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return "encendido (corte de luz o enchufado)";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT (cayo la tension de alimentacion)";
+    case ESP_RST_SW:        return "reinicio por software";
+    case ESP_RST_PANIC:     return "PANIC (excepcion del firmware)";
+    case ESP_RST_INT_WDT:   return "watchdog de interrupciones";
+    case ESP_RST_TASK_WDT:  return "watchdog de tareas (loop colgado)";
+    case ESP_RST_WDT:       return "watchdog";
+    case ESP_RST_EXT:       return "pin de reset";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    default: {
+      static char b[32];
+      snprintf(b, sizeof(b), "codigo %d (ej. reset por USB)", (int)esp_reset_reason());
+      return b;
+    }
+  }
+}
+
+static void iniciarLog() {
+  logOk = LittleFS.begin(true);   // true: formatear si esta vacia (primera vez)
+  Preferences p;
+  p.begin("log", false);
+  numArranque = p.getULong("n", 0) + 1;
+  p.putULong("n", numArranque);
+  p.end();
+  logEvento("ARRANQUE v%s, motivo: %s%s", FIRMWARE_VERSION, motivoArranque(),
+            logOk ? "" : " (sin LittleFS)");
+}
+
+// Ultimos 'maxBytes' del log (incluye el final de log1 si hace falta)
+static String leerLog(size_t maxBytes) {
+  String out;
+  if (!logOk) return "sin log";
+  const char* archivos[2] = {"/log1.txt", "/log.txt"};
+  for (int k = 0; k < 2; k++) {
+    if (!LittleFS.exists(archivos[k])) continue;
+    File f = LittleFS.open(archivos[k], FILE_READ);
+    if (!f) continue;
+    out += f.readString();
+    f.close();
+  }
+  if (out.length() > maxBytes) {
+    out = out.substring(out.length() - maxBytes);
+    int nl = out.indexOf('\n');
+    if (nl >= 0) out = out.substring(nl + 1);
+  }
+  return out;
+}
 
 // ---------------- Configuracion persistente (NVS) ----------------
 struct Config {
@@ -538,6 +631,8 @@ volatile bool cmdPendiente = false;
 char     cmdBuf[32];
 
 const uint32_t REINICIO_SIN_WIFI_MS = 10UL * 60 * 1000;  // 10 min sin WiFi -> reinicio
+const uint32_t REHACER_WIFI_MS      = 3UL * 60 * 1000;   // cada 3 min sin WiFi -> rehacer la conexion
+uint32_t tProxRehacerWifi = REHACER_WIFI_MS;            // (relativo a tWifiPerdido)
 const uint32_t REPUBLICAR_MS        = 60UL * 1000;       // re-publicar aunque no cambie
 const uint32_t LECTURA_VIEJA_MS     = 30UL * 1000;       // sin lectura estable -> "sin lectura"
 
@@ -657,7 +752,7 @@ static void conectarMqtt() {
     ? mqtt.connect(clientId.c_str(), cfg.mqttUser.c_str(), cfg.mqttPass.c_str(), tEstado.c_str(), 1, true, "offline")
     : mqtt.connect(clientId.c_str(), tEstado.c_str(), 1, true, "offline");
   if (ok) {
-    Serial.println("MQTT: conectado");
+    logEvento("MQTT: conectado");
     reconexionesMqtt++;
     tConexionMqtt = millis();
     mqttEstabaConectado = true;
@@ -687,7 +782,9 @@ static void otaLog(const char* fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(b, sizeof(b), fmt, ap);
   va_end(ap);
-  Serial.printf("OTA: %s\n", b);
+  size_t lb = strlen(b);
+  if (lb && b[lb - 1] == '%') Serial.printf("OTA: %s\n", b);
+  else logEvento("OTA: %s", b);
   if (mqtt.connected()) { mqtt.publish(tOta.c_str(), b); mqtt.loop(); }
 }
 
@@ -913,11 +1010,30 @@ static void publicarMatriz() {
   }
 }
 
+// Publica las ultimas ~6 KB del log en <prefijo>/log, en pedazos de ~1,5 KB (no retenido)
+static void publicarLog() {
+  if (!mqtt.connected()) return;
+  String l = leerLog(6000);
+  String t = cfg.prefijo + "/log";
+  for (unsigned i = 0; i < l.length(); i += 1500) {
+    String parte = l.substring(i, min((unsigned)l.length(), i + 1500));
+    mqtt.publish(t.c_str(), parte.c_str());
+    mqtt.loop();
+    delay(50);
+  }
+  mqtt.publish(t.c_str(), "--- fin del log ---");
+}
+
 static void ejecutarComando(String c) {
   c.trim();
   c.toUpperCase();
   Serial.printf("Comando: %s\n", c.c_str());
   if (c == "MATRIZ") publicarMatriz();
+  else if (c == "LOG") publicarLog();
+  else if (c == "LOGBORRAR") {
+    if (logOk) { LittleFS.remove("/log.txt"); LittleFS.remove("/log1.txt"); }
+    logEvento("log borrado por comando");
+  }
   else if (c.startsWith("TX ")) {
     // potencia WiFi en dBm, ej. "TX 8.5"; se guarda en la flash y se aplica ya
     float dbm = c.substring(3).toFloat();
@@ -955,19 +1071,34 @@ static void mantenerRed() {
       // daba un numero enorme y reiniciaba al toque (y contaba como arranque fallido)
       sinWifi = true;
       tWifiPerdido = millis();
-      Serial.println("WiFi: desconectado");
+      tProxRehacerWifi = REHACER_WIFI_MS;
+      logEvento("WiFi: desconectado");
     }
-    // setAutoReconnect se encarga; si en 10 min no vuelve, reinicio completo
-    if (millis() - tWifiPerdido > REINICIO_SIN_WIFI_MS) {
-      Serial.println("WiFi: 10 min sin conexion, reiniciando");
+    // setAutoReconnect se encarga. Si no vuelve: a los 3 min rehacer el WiFi de cero
+    // (y cada 3 min despues); a los 10 min borrar la calibracion de la radio y reiniciar.
+    uint32_t sinRed = millis() - tWifiPerdido;
+    if (sinRed > REINICIO_SIN_WIFI_MS) {
+      logEvento("WiFi: 10 min sin conexion, recalibro la radio y reinicio");
+      esp_phy_erase_cal_data_in_nvs();
       delay(100);
       ESP.restart();
+    }
+    if (sinRed > tProxRehacerWifi) {
+      tProxRehacerWifi += REHACER_WIFI_MS;
+      logEvento("WiFi: %lu s sin conexion, rehago la conexion (estado %d)",
+                (unsigned long)(sinRed / 1000), (int)WiFi.status());
+      WiFi.disconnect(false, false);
+      delay(300);
+      WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
+      WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
     }
     return;
   }
   if (sinWifi) {
     sinWifi = false;
     reconexionesWifi++;
+    logEvento("WiFi: conectado tras %lu s sin red, RSSI %d dBm",
+              (unsigned long)((millis() - tWifiPerdido) / 1000), WiFi.RSSI());
     Serial.printf("WiFi: conectado, IP %s, RSSI %d dBm\n",
                   WiFi.localIP().toString().c_str(), WiFi.RSSI());
     tProxMqtt = 0;
@@ -978,15 +1109,17 @@ static void mantenerRed() {
     mqttEstabaConectado = false;
     if (millis() - tConexionMqtt < CORTE_RAPIDO_MS) cortesRapidos++;
     else cortesRapidos = 0;
-    Serial.printf("MQTT: se corto (cortes rapidos seguidos: %u)\n", cortesRapidos);
+    logEvento("MQTT: se corto tras %lu s (estado %d, cortes rapidos seguidos %u, WiFi %s, RSSI %d)",
+              (unsigned long)((millis() - tConexionMqtt) / 1000), mqtt.state(), cortesRapidos,
+              WiFi.status() == WL_CONNECTED ? "ok" : "caido", WiFi.RSSI());
     if (cortesRapidos >= 6) {
-      Serial.println("Radio: borro la calibracion y reinicio");
+      logEvento("Radio: 6 cortes rapidos, borro la calibracion y reinicio");
       esp_phy_erase_cal_data_in_nvs();
       delay(200);
       ESP.restart();
     }
     if (cortesRapidos == 3) {
-      Serial.println("Radio: rehago la conexion WiFi");
+      logEvento("Radio: 3 cortes rapidos, rehago la conexion WiFi");
       WiFi.disconnect(false, false);
       delay(500);
       WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
@@ -1115,9 +1248,10 @@ static void comandosSerie() {
     else if (l == "s") modoEstado();
     else if (l == "v") { verbose = !verbose; Serial.printf("verbose %s\n", verbose ? "ON" : "OFF"); }
     else if (l == "cfg") modoConfig();
+    else if (l == "log") { Serial.println(leerLog(30000)); Serial.println("--- fin del log ---"); }
     else if (l.startsWith("set ")) comandoSet(l.substring(4));
     else if (l == "check" || l == "ota" || l == "reboot") ejecutarComando(l);
-    else if (l.length()) Serial.println("Comandos: s m r v cfg set check ota reboot");
+    else if (l.length()) Serial.println("Comandos: s m r v cfg log set check ota reboot");
   }
 }
 
@@ -1126,8 +1260,9 @@ void setup() {
   Serial.begin(115200);
   for (int i = 0; i < 7; i++) pinMode(PIN_GPIO[i], INPUT);
   delay(1500);
-  Serial.printf("Espia STC-1000 v%s. Comandos: s m r v cfg set check ota reboot\n", FIRMWARE_VERSION);
+  Serial.printf("Espia STC-1000 v%s. Comandos: s m r v cfg log set check ota reboot\n", FIRMWARE_VERSION);
 
+  iniciarLog();
   revisarRollback();
   cargarConfig();
   aplicarSecrets();
