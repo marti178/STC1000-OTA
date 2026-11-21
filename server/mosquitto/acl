@@ -1,11 +1,21 @@
 # ACL de Mosquitto para el termostato STC-1000.
 # "write" = publicar, "read" = suscribirse/recibir.
 
-# ESP32
+# ESP32: solo los topicos que publica el firmware (no historial_largo, que es del server)
 user stc1000
-topic write stc1000/#
+topic write stc1000/estado
+topic write stc1000/temperatura
+topic write stc1000/display
+topic write stc1000/info
+topic write stc1000/firmware
+topic write stc1000/historial
+topic write stc1000/salidas
+topic write stc1000/ota
+topic write stc1000/diag
+topic write stc1000/log
 topic write homeassistant/#
-topic read stc1000/comando
+# lee los comandos y publica un retenido vacio para borrar el que ya ejecuto
+topic readwrite stc1000/comando
 
 # App Android
 user celular

@@ -13,8 +13,8 @@ El ESP32 habla **solo por la LAN**. Desde internet se llega únicamente por Funn
 aparte que solo conoce al usuario `celular`: la clave del ESP32 no sirve desde afuera. No se abrió
 ningún puerto en el router.
 
-Las contraseñas **no** están en este repo. Están en `C:\Users\marti\server-debian\mqtt-credenciales.txt`
-(en esta PC) y en `include/secrets.h` (ignorado por git).
+Las contraseñas **no** están en este repo. Están en un archivo de credenciales guardado fuera del
+repo, en la PC del usuario, y en `include/secrets.h` (ignorado por git).
 
 ## Qué hay instalado
 
@@ -49,7 +49,7 @@ Las contraseñas **no** están en este repo. Están en `C:\Users\marti\server-de
 
 | Usuario | Quién | Por dónde | Puede publicar | Puede leer |
 |---|---|---|---|---|
-| `stc1000` | ESP32 | solo 1883 (LAN/Tailscale) | `stc1000/#`, `homeassistant/#` | solo `stc1000/comando` |
+| `stc1000` | ESP32 | solo 1883 (LAN/Tailscale) | `stc1000/` + `estado`, `temperatura`, `display`, `info`, `firmware`, `historial`, `salidas`, `ota`, `diag`, `log`, `comando` (un retenido vacío para borrar el comando ya ejecutado); `homeassistant/#` | solo `stc1000/comando` |
 | `celular` | App Android | 1883 y Funnel (8443) | solo `stc1000/comando` | `stc1000/#` |
 | `historial` | Servicio `stc1000-historial` (en el server) | 1883 (localhost) | solo `stc1000/historial_largo` | solo `stc1000/historial` |
 
@@ -169,6 +169,13 @@ publica una ventana de 30 días.
 - **Ignora los mensajes que llegan como retenidos**: así nunca entra un historial viejo o de prueba,
   como el ficticio que se publicó el 20/11/2026 para probar la app. No se pierde nada, porque el ESP32
   republica las 24 h completas cada 5 min.
+- **Valida cada mensaje** y descarta lo que no cumpla: `paso_s` distinto de 300, más de 288 valores,
+  `fin` que no sea entero, que esté en el futuro (más de 10 min) o que tenga más de 400 días, `NaN` o
+  `Infinity`. También descarta los valores sueltos fuera de -50 a 150 °C. `historial_largo` solo
+  usa muestras que no estén en el futuro.
+- **No se cuelga en silencio**: ningún error dentro del callback de MQTT corta el hilo de red. Si
+  igual ese hilo muere, o pasan 10 min sin broker, el proceso sale con error y systemd lo reinicia
+  (`Restart=always`).
 - **Salida**: publica **retenido, QoS 1** en `stc1000/historial_largo` con el mismo formato:
   `{"paso_s":300,"fin":<ts de la última muestra guardada>,"t":[...]}`. Incluye hasta 8640 valores
   (30 días), de la más vieja a la más nueva, con `null` donde falta. Se publica al arrancar, después

@@ -16,6 +16,7 @@
 
 import json
 import logging
+import math
 import os
 import sqlite3
 import threading
@@ -37,6 +38,11 @@ VENTANA = 30 * 24 * 3600 // PASO_S       # 8640 muestras = 30 dias
 RETENCION_S = 400 * 24 * 3600            # ventana movil de algo mas de 1 anio
 CADA_S = 300                             # publicar cada 5 min
 VACUUM_CADA_S = 24 * 3600                # compactar el archivo una vez por dia
+MAX_MUESTRAS = 288                       # el ESP32 manda 24 h
+FUTURO_S = 600                           # tolerancia de reloj hacia adelante
+TEMP_MIN, TEMP_MAX = -50.0, 150.0        # fuera de esto es basura
+REVISAR_S = 30                           # cada cuanto se revisa el hilo de red
+SIN_CONEXION_MAX_S = 600                 # 10 min sin broker: salir y que systemd reinicie
 
 log = logging.getLogger("stc1000-historial")
 lock = threading.Lock()
@@ -50,14 +56,38 @@ def abrir_db():
     return db
 
 
+def _sin_nan(valor):
+    raise ValueError(f"valor no numerico: {valor}")
+
+
 def guardar(db, payload):
-    """Guarda las muestras de un historial. Devuelve cuantas se escribieron."""
-    h = json.loads(payload)
-    paso = int(h["paso_s"])
-    fin = int(h["fin"])
-    t = h["t"]
+    """Valida y guarda las muestras de un historial. Devuelve cuantas se escribieron.
+    Lanza ValueError si el mensaje no cumple el contrato."""
+    h = json.loads(payload, parse_constant=_sin_nan)   # rechaza NaN e Infinity
+    if not isinstance(h, dict):
+        raise ValueError("no es un objeto JSON")
+    paso, fin, t = h.get("paso_s"), h.get("fin"), h.get("t")
+    if paso != PASO_S:
+        raise ValueError(f"paso_s={paso!r}, se esperaba {PASO_S}")
+    if not isinstance(fin, int) or isinstance(fin, bool):
+        raise ValueError(f"fin={fin!r} no es entero")
+    ahora = int(time.time())
+    if not ahora - RETENCION_S <= fin <= ahora + FUTURO_S:
+        raise ValueError(f"fin={fin} fuera de rango (ahora={ahora})")
+    if not isinstance(t, list) or not 1 <= len(t) <= MAX_MUESTRAS:
+        raise ValueError(f"t debe ser una lista de 1 a {MAX_MUESTRAS} valores")
     n = len(t)
-    filas = [(fin - (n - 1 - i) * paso, float(v)) for i, v in enumerate(t) if v is not None]
+    filas, malas = [], 0
+    for i, v in enumerate(t):
+        if v is None:
+            continue
+        if (isinstance(v, (int, float)) and not isinstance(v, bool)
+                and math.isfinite(v) and TEMP_MIN <= v <= TEMP_MAX):
+            filas.append((fin - (n - 1 - i) * PASO_S, float(v)))
+        else:
+            malas += 1
+    if malas:
+        log.warning("descarto %d valores invalidos del historial", malas)
     with lock:
         # mismo timestamp: gana el valor mas nuevo
         db.executemany("INSERT OR REPLACE INTO muestras (ts, temp) VALUES (?, ?)", filas)
@@ -78,14 +108,17 @@ def podar(db, compactar=False):
 
 
 def armar_largo(db):
-    """Arma el JSON de los ultimos 30 dias, o None si no hay datos."""
+    """Arma el JSON de los ultimos 30 dias, o None si no hay datos.
+    Ignora muestras con timestamp en el futuro (la app las rechazaria)."""
+    tope = int(time.time()) + FUTURO_S
     with lock:
-        fila = db.execute("SELECT MAX(ts) FROM muestras").fetchone()
+        fila = db.execute("SELECT MAX(ts) FROM muestras WHERE ts <= ?", (tope,)).fetchone()
         fin = fila[0]
         if fin is None:
             return None
         desde = fin - (VENTANA - 1) * PASO_S
-        filas = db.execute("SELECT ts, temp FROM muestras WHERE ts >= ? ORDER BY ts", (desde,)).fetchall()
+        filas = db.execute("SELECT ts, temp FROM muestras WHERE ts BETWEEN ? AND ? ORDER BY ts",
+                           (desde, fin)).fetchall()
     primero = filas[0][0]
     n = (fin - primero) // PASO_S + 1
     t = [None] * n
@@ -121,15 +154,23 @@ def main():
         if m.retain:
             log.info("ignoro el retenido de %s (puede ser viejo o de prueba)", m.topic)
             return
+        # nada de lo que llegue puede tirar abajo el hilo de red
         try:
             n = guardar(db, m.payload)
-        except (ValueError, KeyError, TypeError) as e:
+        except ValueError as e:
             log.warning("historial invalido: %s", e)
             return
+        except Exception:
+            log.exception("error guardando el historial")
+            return
         log.info("guardadas %d muestras", n)
-        publicar(cli, db)
+        try:
+            publicar(cli, db)
+        except Exception:
+            log.exception("error publicando %s", T_SALIDA)
 
     cli = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="stc1000-historial")
+    cli.suppress_exceptions = True       # un error en un callback se loguea, no mata el hilo
     cli.username_pw_set(USER, PASS)
     cli.on_connect = on_connect
     cli.on_message = on_message
@@ -137,14 +178,32 @@ def main():
     cli.connect_async(HOST, PORT, keepalive=60)
     cli.loop_start()
 
+    ultima_publicacion = time.monotonic()
+    ultima_conexion = time.monotonic()
     while True:
-        time.sleep(CADA_S)
-        compactar = time.monotonic() - ultimo_vacuum >= VACUUM_CADA_S
-        podar(db, compactar)
-        if compactar:
-            ultimo_vacuum = time.monotonic()
+        time.sleep(REVISAR_S)
+        # si el hilo de red murio o no hay broker hace rato, salir: systemd reinicia
+        hilo = getattr(cli, "_thread", None)
+        if hilo is None or not hilo.is_alive():
+            log.error("murio el hilo de red de MQTT, salgo para que systemd reinicie")
+            os._exit(1)
         if cli.is_connected():
-            publicar(cli, db)
+            ultima_conexion = time.monotonic()
+        elif time.monotonic() - ultima_conexion > SIN_CONEXION_MAX_S:
+            log.error("%d s sin conexion al broker, salgo para que systemd reinicie", SIN_CONEXION_MAX_S)
+            os._exit(1)
+        if time.monotonic() - ultima_publicacion < CADA_S:
+            continue
+        ultima_publicacion = time.monotonic()
+        try:
+            compactar = time.monotonic() - ultimo_vacuum >= VACUUM_CADA_S
+            podar(db, compactar)
+            if compactar:
+                ultimo_vacuum = time.monotonic()
+            if cli.is_connected():
+                publicar(cli, db)
+        except Exception:
+            log.exception("error en el ciclo periodico")
 
 
 if __name__ == "__main__":
