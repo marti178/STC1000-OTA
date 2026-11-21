@@ -58,6 +58,7 @@
 #include <esp_ota_ops.h>
 #include <esp_phy_init.h>
 #include <LittleFS.h>
+#include <esp_task_wdt.h>
 #include <time.h>
 #include "mbedtls/md.h"
 #include "driver/gpio.h"
@@ -1427,7 +1428,11 @@ void setup() {
   mqtt.setKeepAlive(30);
   mqtt.setSocketTimeout(4);
 
-  enableLoopWDT();               // si loop() se cuelga mas de 5 s, reinicia
+  // Watchdog del loop: 30 s (el de fabrica es 5 s). Con el enlace WiFi muriendo, un
+  // publish de MQTT puede quedar ~10 s esperando el socket (WiFiClient reintenta la
+  // escritura) y con 5 s el watchdog reiniciaba el equipo (visto en el log a 220 V).
+  esp_task_wdt_init(30, true);
+  enableLoopWDT();               // si loop() se cuelga mas de 30 s, reinicia
 }
 
 void loop() {
