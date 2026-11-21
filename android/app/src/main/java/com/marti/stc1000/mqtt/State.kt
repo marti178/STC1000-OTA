@@ -122,5 +122,16 @@ fun DeviceState.isOnline(nowSec: Long): Boolean? {
     return if (nowSec - since <= SIGNAL_FRESH_SEC) null else false
 }
 
+/** ¿El firmware entiende comandos con vencimiento (`REBOOT@<epoch>`)? Desde la 1.1.8. */
+fun supportsCommandExpiry(version: String?): Boolean {
+    val p = version?.trim()?.split('.')?.mapNotNull { it.toIntOrNull() } ?: return false
+    if (p.size < 3) return false
+    return (p[0] * 1_000_000 + p[1] * 1_000 + p[2]) >= 1_001_008
+}
+
+/** Comando con la hora en que se manda, para que el equipo lo ignore si llega tarde (más de 5 min). */
+fun stampCommand(command: String, version: String?, nowSec: Long): String =
+    if (supportsCommandExpiry(version)) "$command@$nowSec" else command
+
 /** Una línea del registro de conexión (solo en memoria, para diagnóstico). */
 data class LogEntry(val ts: Long, val text: String, val isError: Boolean = false)

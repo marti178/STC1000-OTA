@@ -202,3 +202,14 @@ class OtaPctTest {
         assertEquals(100, com.marti.stc1000.mqtt.nextOtaPct(97, "listo, reiniciando"))
     }
 }
+
+class CommandStampTest {
+    @Test
+    fun soSeFirmaConFirmwareQueLoEntiende() {
+        assertEquals("REBOOT", com.marti.stc1000.mqtt.stampCommand("REBOOT", "1.1.7", 1000))
+        assertEquals("REBOOT", com.marti.stc1000.mqtt.stampCommand("REBOOT", null, 1000))
+        assertEquals("REBOOT@1000", com.marti.stc1000.mqtt.stampCommand("REBOOT", "1.1.8", 1000))
+        assertEquals("CHECK@1000", com.marti.stc1000.mqtt.stampCommand("CHECK", "1.2.0", 1000))
+        assertEquals("CHECK@1000", com.marti.stc1000.mqtt.stampCommand("CHECK", "2.0.0", 1000))
+    }
+}

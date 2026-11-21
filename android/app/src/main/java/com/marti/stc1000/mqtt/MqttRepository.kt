@@ -135,7 +135,9 @@ class MqttRepository(context: Context) {
     fun retryNow() = net.kick()
 
     /** Publica un comando (`CHECK`, `OTA`, `REBOOT`) retenido y con QoS 1, como pide el contrato. */
-    suspend fun sendCommand(command: String): Result<Unit> {
+    suspend fun sendCommand(rawCommand: String): Result<Unit> {
+        val d = _device.value
+        val command = stampCommand(rawCommand, d.firmware ?: d.info?.version, System.currentTimeMillis() / 1000)
         val c = client ?: return Result.failure(IllegalStateException("No hay conexión con el server."))
         return try {
             withTimeout(COMMAND_TIMEOUT_MS) {
