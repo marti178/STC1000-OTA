@@ -416,8 +416,10 @@ static const char* auxEstado(int idx) {
   if (idx < AUX_INI) return "off";
   int i = idx - AUX_INI;
   uint32_t ahora = millis();
-  bool on  = auxVistoOn[i]  && ahora - auxVistoOn[i]  < AUX_VENTANA_MS;
-  bool off = auxVistoOff[i] && ahora - auxVistoOff[i] < AUX_VENTANA_MS;
+  // resta con signo: "ahora | 1" puede quedar 1 ms adelante de millis() y la resta sin
+  // signo daria un numero enorme (el LED parecia apagarse cada tanto)
+  bool on  = auxVistoOn[i]  && (int32_t)(ahora - auxVistoOn[i])  < (int32_t)AUX_VENTANA_MS;
+  bool off = auxVistoOff[i] && (int32_t)(ahora - auxVistoOff[i]) < (int32_t)AUX_VENTANA_MS;
   if (on && off) return "parpadea";
   return on ? "on" : "off";
 }
