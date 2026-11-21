@@ -635,6 +635,35 @@ const uint32_t REINICIO_SIN_WIFI_MS = 10UL * 60 * 1000;  // 10 min sin WiFi -> r
 // reconexion automatica no lo destraba; rehaciendo la conexion conecta en segundos.
 const uint32_t REHACER_WIFI_MS      = 45UL * 1000;       // cada 45 s sin WiFi -> rehacer la conexion
 uint32_t tProxRehacerWifi = REHACER_WIFI_MS;            // (relativo a tWifiPerdido)
+
+// Motivo de las desconexiones del WiFi (lo informa el driver en un evento). El evento
+// corre en otra tarea: aca solo se anota; el log a la flash se escribe desde loop().
+volatile uint8_t  wifiMotivo = 0;        // ultimo motivo (wifi_err_reason_t)
+volatile uint32_t wifiDesconexiones = 0; // cuantas desconexiones informo el driver
+uint8_t  wifiMotivoLogueado = 0;
+uint32_t wifiDescLogueadas = 0, tLogMotivo = 0;
+
+static void alEventoWifi(arduino_event_id_t ev, arduino_event_info_t info) {
+  if (ev == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    wifiMotivo = info.wifi_sta_disconnected.reason;
+    wifiDesconexiones++;
+  }
+}
+
+// Anota en el log los motivos nuevos. Si se repite el mismo motivo (intentos fallidos
+// seguidos) se resume a lo sumo una vez por minuto, con la cantidad.
+static void logMotivoWifi() {
+  uint32_t n = wifiDesconexiones;
+  if (n == wifiDescLogueadas) return;
+  uint8_t m = wifiMotivo;
+  if (m == wifiMotivoLogueado && millis() - tLogMotivo < 60000) return;
+  logEvento("WiFi: desconexion, motivo %u (%s), %lu veces desde el ultimo aviso", m,
+            WiFi.disconnectReasonName((wifi_err_reason_t)m),
+            (unsigned long)(n - wifiDescLogueadas));
+  wifiDescLogueadas = n;
+  wifiMotivoLogueado = m;
+  tLogMotivo = millis();
+}
 const uint32_t REPUBLICAR_MS        = 60UL * 1000;       // re-publicar aunque no cambie
 const uint32_t LECTURA_VIEJA_MS     = 30UL * 1000;       // sin lectura estable -> "sin lectura"
 
@@ -1067,6 +1096,7 @@ static void procesarComandoMqtt() {
 }
 
 static void mantenerRed() {
+  logMotivoWifi();
   if (WiFi.status() != WL_CONNECTED) {
     if (!sinWifi) {
       // antes era millis() | 1, que podia quedar 1 ms en el futuro: la resta de abajo
@@ -1288,6 +1318,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("stc1000");
   WiFi.setAutoReconnect(true);
+  WiFi.onEvent(alEventoWifi);
   // Sin ahorro de energia: el equipo va enchufado, y el modem sleep traba las
   // descargas TCP largas (el OTA se frenaba a los ~96 KB)
   WiFi.setSleep(false);
