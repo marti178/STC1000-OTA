@@ -22,7 +22,8 @@
 //  stc1000/historial    JSON con las ultimas 24 h (retenido, cada 5 min):
 //                       {"paso_s":300,"fin":<epoch de la ultima muestra>,"t":[..., null, ...]}
 //  stc1000/ota          avance de la actualizacion (no retenido)
-//  stc1000/comando      ENTRADA: CHECK (buscar version nueva), OTA (forzar), REBOOT
+//  stc1000/comando      ENTRADA: CHECK (buscar version nueva), OTA (forzar), REBOOT, MATRIZ
+//  stc1000/diag         respuesta a MATRIZ: por mil de cada par activo (5 tandas de 1 s)
 //  + autodescubrimiento de Home Assistant (homeassistant/sensor/...)
 //
 // CONFIGURACION (WiFi y MQTT): se guarda en la flash del ESP32 (NVS), que el OTA
@@ -753,11 +754,39 @@ static void buscarActualizacion(bool forzar) {
   tProxOta = millis() + OTA_CADA_MS;
 }
 
+// Diagnostico remoto (con 220 V no se puede usar el USB): publica en <prefijo>/diag
+// el porcentaje por mil de cada par activo, en 5 tandas de 1 s, y el texto decodificado.
+static void publicarMatriz() {
+  if (!mqtt.connected()) return;
+  String tDiag = cfg.prefijo + "/diag";
+  for (int k = 0; k < 5; k++) {
+    feedLoopWDT();
+    acumular(1000);
+    Lectura L;
+    decodificar(L);
+    String j = "{\"n\":" + String(muestras) + ",\"texto\":\"" + L.texto + "\",\"pm\":{";
+    bool primero = true;
+    for (int a = 1; a <= 7; a++)
+      for (int c = 1; c <= 7; c++) {
+        if (a == c) continue;
+        uint32_t pm = muestras ? cuenta[a][c] * 1000 / muestras : 0;
+        if (pm == 0) continue;
+        if (!primero) j += ',';
+        primero = false;
+        j += "\"+" + String(a) + "/-" + String(c) + "\":" + String(pm);
+      }
+    j += "}}";
+    mqtt.publish(tDiag.c_str(), j.c_str());
+    mqtt.loop();
+  }
+}
+
 static void ejecutarComando(String c) {
   c.trim();
   c.toUpperCase();
   Serial.printf("Comando: %s\n", c.c_str());
-  if (c == "CHECK") buscarActualizacion(false);
+  if (c == "MATRIZ") publicarMatriz();
+  else if (c == "CHECK") buscarActualizacion(false);
   else if (c == "OTA") buscarActualizacion(true);
   else if (c == "REBOOT") {
     if (mqtt.connected()) { mqtt.publish(tEstado.c_str(), "offline", true); mqtt.loop(); }
