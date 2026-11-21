@@ -631,7 +631,9 @@ volatile bool cmdPendiente = false;
 char     cmdBuf[32];
 
 const uint32_t REINICIO_SIN_WIFI_MS = 10UL * 60 * 1000;  // 10 min sin WiFi -> reinicio
-const uint32_t REHACER_WIFI_MS      = 3UL * 60 * 1000;   // cada 3 min sin WiFi -> rehacer la conexion
+// Al enchufar a 220 V el primer intento de conexion queda trabado (estado 6) y la
+// reconexion automatica no lo destraba; rehaciendo la conexion conecta en segundos.
+const uint32_t REHACER_WIFI_MS      = 45UL * 1000;       // cada 45 s sin WiFi -> rehacer la conexion
 uint32_t tProxRehacerWifi = REHACER_WIFI_MS;            // (relativo a tWifiPerdido)
 const uint32_t REPUBLICAR_MS        = 60UL * 1000;       // re-publicar aunque no cambie
 const uint32_t LECTURA_VIEJA_MS     = 30UL * 1000;       // sin lectura estable -> "sin lectura"
@@ -1074,8 +1076,7 @@ static void mantenerRed() {
       tProxRehacerWifi = REHACER_WIFI_MS;
       logEvento("WiFi: desconectado");
     }
-    // setAutoReconnect se encarga. Si no vuelve: a los 3 min rehacer el WiFi de cero
-    // (y cada 3 min despues); a los 10 min borrar la calibracion de la radio y reiniciar.
+    // setAutoReconnect se encarga. Si no vuelve: cada 45 s rehacer el WiFi de cero; a los 10 min borrar la calibracion de la radio y reiniciar.
     uint32_t sinRed = millis() - tWifiPerdido;
     if (sinRed > REINICIO_SIN_WIFI_MS) {
       logEvento("WiFi: 10 min sin conexion, recalibro la radio y reinicio");
