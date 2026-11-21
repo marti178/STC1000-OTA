@@ -100,6 +100,8 @@ data class DeviceState(
     val watchSinceSec: Long? = null,
     /** Cuándo (epoch s) llegó un `estado` EN VIVO (no retenido); un "offline" en vivo más nuevo que la última señal manda. */
     val estadoLiveAtSec: Long? = null,
+    /** El equipo publicó `temperatura` vacía: el display no muestra número (LLL, HHH, sin lectura). */
+    val noReading: Boolean = false,
     /** Cuándo (epoch s) llegó por última vez una temperatura EN VIVO (no retenida). */
     val lastLiveAtSec: Long? = null,
 )
@@ -116,10 +118,11 @@ fun DeviceState.isOnline(nowSec: Long): Boolean? {
     val signal = lastSignalAtSec
     val liveOffline = online == false && estadoLiveAtSec != null && (signal == null || estadoLiveAtSec >= signal)
     if (liveOffline) return false
-    if (signal != null && nowSec - signal <= SIGNAL_FRESH_SEC) return true
+    val window = signalWindowSec(firmware ?: info?.version)
+    if (signal != null && nowSec - signal <= window) return true
     if (online == false) return false
     val since = watchSinceSec ?: return false
-    return if (nowSec - since <= SIGNAL_FRESH_SEC) null else false
+    return if (nowSec - since <= window) null else false
 }
 
 /** ¿El firmware entiende comandos con vencimiento (`REBOOT@<epoch>`)? Desde la 1.1.8. */

@@ -213,3 +213,13 @@ class CommandStampTest {
         assertEquals("CHECK@1000", com.marti.stc1000.mqtt.stampCommand("CHECK", "2.0.0", 1000))
     }
 }
+
+class SignalWindowTest {
+    @Test
+    fun conLatidoDe20sLaVentanaEsMasCorta() {
+        val nuevo = DeviceState(firmware = "1.1.8", lastSignalAtSec = 930, watchSinceSec = 0)
+        assertEquals(false, nuevo.isOnline(1000)) // 70 s sin señal con latido de 20 s: caido
+        val viejo = DeviceState(firmware = "1.1.7", lastSignalAtSec = 930, watchSinceSec = 0)
+        assertEquals(true, viejo.isOnline(1000)) // con latido de 60 s todavia entra en 75 s
+    }
+}

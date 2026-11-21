@@ -258,11 +258,23 @@ class MqttRepository(context: Context) {
                 )
             }
             "temperatura" -> {
+                // Payload vacio = el display no muestra numero: se borra el valor y no se suma al grafico.
+                if (text.isBlank()) {
+                    _device.update { d ->
+                        d.copy(
+                            temperature = null,
+                            noReading = true,
+                            lastSignalAtSec = if (retained) d.lastSignalAtSec else now,
+                        )
+                    }
+                    return
+                }
                 val v = text.trim().replace(',', '.').toDoubleOrNull() ?: return
                 if (!Samples.isPlausible(v)) return
                 _device.update { d ->
                     d.copy(
                         temperature = v,
+                        noReading = false,
                         lastLiveAtSec = if (retained) d.lastLiveAtSec else now,
                         lastSignalAtSec = if (retained) d.lastSignalAtSec else now,
                     )

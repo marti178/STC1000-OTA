@@ -135,7 +135,7 @@ private const val OTA_SHOW_SEC = 60L
 @Composable
 private fun RangeBanner(state: MainUiState) {
     val p = state.prefs
-    val t = state.device.temperature ?: state.lastSample?.temp
+    val t = if (state.device.noReading) null else state.device.temperature ?: state.lastSample?.temp
     // No se juzga el rango con un dato viejo, un display con error o sin conexion al server.
     val ageSec = liveAgeSec(state)
     val fresh = state.connection == ConnectionState.Connected && ageSec != null && ageSec <= STALE_AFTER_SEC &&
@@ -172,7 +172,7 @@ private fun HeroCard(state: MainUiState) {
     val unit = LocalTempUnit.current
     val device = state.device
     val problem = Format.displayProblem(device.display)
-    val temp = device.temperature ?: state.lastSample?.temp
+    val temp = if (device.noReading) null else device.temperature ?: state.lastSample?.temp
     val ageSec = liveAgeSec(state)
     val stale = ageSec != null && ageSec > STALE_AFTER_SEC
     val connected = state.connection == ConnectionState.Connected
