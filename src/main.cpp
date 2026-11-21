@@ -402,13 +402,21 @@ static bool filtrar(const Lectura& L) {   // devuelve true si L quedo como estab
 const int AUX_INI = 21;
 const int N_AUX = N_LEDS - AUX_INI;
 const uint32_t AUX_VENTANA_MS = 3000;
-uint32_t auxVistoOn[N_AUX], auxVistoOff[N_AUX];
+// Estado actual de cada LED y hora de sus dos ultimos cambios. Parpadea = cambio dos
+// veces en la ventana (un cambio solo, ej. el rele pasando de calor a frio, no cuenta).
+bool     auxActual[N_AUX];
+uint32_t auxCambio1[N_AUX], auxCambio2[N_AUX];   // ultimo y anteultimo cambio
+uint8_t  auxCambios[N_AUX];                      // cuantos cambios hubo (hasta 2)
 
 static void auxTick() {
   uint32_t ahora = millis();
   for (int i = 0; i < N_AUX; i++) {
-    if (activo(MAPA[AUX_INI + i].an, MAPA[AUX_INI + i].ca)) auxVistoOn[i] = ahora | 1;
-    else auxVistoOff[i] = ahora | 1;
+    bool on = activo(MAPA[AUX_INI + i].an, MAPA[AUX_INI + i].ca);
+    if (on == auxActual[i]) continue;
+    auxActual[i] = on;
+    auxCambio2[i] = auxCambio1[i];
+    auxCambio1[i] = ahora;
+    if (auxCambios[i] < 2) auxCambios[i]++;
   }
 }
 
@@ -416,13 +424,10 @@ static void auxTick() {
 static const char* auxEstado(int idx) {
   if (idx < AUX_INI) return "off";
   int i = idx - AUX_INI;
-  uint32_t ahora = millis();
-  // resta con signo: "ahora | 1" puede quedar 1 ms adelante de millis() y la resta sin
-  // signo daria un numero enorme (el LED parecia apagarse cada tanto)
-  bool on  = auxVistoOn[i]  && (int32_t)(ahora - auxVistoOn[i])  < (int32_t)AUX_VENTANA_MS;
-  bool off = auxVistoOff[i] && (int32_t)(ahora - auxVistoOff[i]) < (int32_t)AUX_VENTANA_MS;
-  if (on && off) return "parpadea";
-  return on ? "on" : "off";
+  // resta con signo por si el cambio quedo registrado en este mismo milisegundo
+  if (auxCambios[i] >= 2 && (int32_t)(millis() - auxCambio2[i]) < (int32_t)AUX_VENTANA_MS)
+    return "parpadea";
+  return auxActual[i] ? "on" : "off";
 }
 
 // ---------------- Historial de 24 h ----------------
