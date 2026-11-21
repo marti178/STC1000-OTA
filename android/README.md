@@ -1,6 +1,6 @@
 # App Android STC-1000
 
-App nativa (Kotlin + Jetpack Compose + Material 3) que muestra la temperatura de un termostato STC-1000 leída por MQTT desde el ESP32: temperatura actual, gráficos (Hoy / 24 h / 7 días / 30 días), estadísticas, estado del equipo y comandos (`CHECK`, `OTA`, `REBOOT`).
+App nativa (Kotlin + Jetpack Compose + Material 3) que muestra la temperatura de un termostato STC-1000 leída por MQTT desde el ESP32: temperatura actual, gráficos (Hoy / 3 h / 24 h / 7 d / 30 d), estadísticas, estado del equipo y comandos (`CHECK`, `OTA`, `REBOOT`).
 
 ## Cómo funciona
 

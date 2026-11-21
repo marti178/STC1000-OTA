@@ -48,6 +48,7 @@ class StatsTest {
         val now = ZonedDateTime.of(2026, 11, 20, 15, 30, 0, 0, zone).toEpochSecond()
         val midnight = ZonedDateTime.of(2026, 11, 20, 0, 0, 0, 0, zone).toEpochSecond()
         assertEquals(midnight, Period.TODAY.startEpoch(now, zone))
+        assertEquals(now - 3 * 3600, Period.LAST_3H.startEpoch(now, zone))
         assertEquals(now - 86400, Period.LAST_24H.startEpoch(now, zone))
         assertEquals(now - 7 * 86400, Period.LAST_7D.startEpoch(now, zone))
     }
