@@ -109,6 +109,9 @@ data class DeviceState(
 /** Segundos sin datos en vivo tras los cuales el equipo se da por caido (publica cada 60 s; keepalive 30 s). */
 const val SIGNAL_FRESH_SEC = 75L
 
+/** Con latido de 20 s (firmware 1.1.8+) alcanza una ventana corta; con el de 60 s hace falta más margen. */
+fun signalWindowSec(version: String?): Long = if (supportsCommandExpiry(version)) 60L else SIGNAL_FRESH_SEC
+
 /**
  * ¿Está el equipo en línea? Criterio estricto: solo cuenta lo recibido EN VIVO (los retenidos pueden ser viejos).
  * true = llegó algo en los últimos [SIGNAL_FRESH_SEC] s; false = no llegó nada o el broker avisó que cayó;
