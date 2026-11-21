@@ -77,6 +77,7 @@
 #define OTA_URL_BIN     "https://marti178.github.io/STC1000-OTA/firmware.bin"
 const uint32_t OTA_PRIMERA_MS = 60UL * 1000;            // primera consulta: 1 min despues de arrancar
 const uint32_t OTA_CADA_MS    = 6UL * 60 * 60 * 1000;   // despues, cada 6 h
+const uint32_t OTA_REINTENTO_MS = 10UL * 60 * 1000;     // si fallo: reintentar en 10 min
 const uint8_t  MAX_ARRANQUES_SIN_CONFIRMAR = 3;         // despues de esto, rollback
 const uint32_t CONFIRMAR_TRAS_MS = 2UL * 60 * 1000;     // el firmware nuevo se confirma si publico y lleva 2 min
 
@@ -106,15 +107,15 @@ const Led MAPA[] = {
   {4,6,"signo -"},              // 23
   {6,4,"punto de grados"},      // 24
   {5,6,"C"},                    // 25
-  {6,5,"Cool"},                 // 26 (LED Cool a la izquierda, confirmado enfriando)
+  {6,5,"Heat"},                 // 26 (LED Heat: prendido a 26,8 y 27,0 C con el calor andando)
   {5,7,"punto extremo der."},   // 27
   {7,6,"punto sup. der. izq."}, // 28
-  {6,7,"Heat"}                  // 29 (LED Heat a la izquierda, confirmado a 220 V)
+  {6,7,"Cool"}                  // 29 (LED Cool: prendido a 28,3 y 29,2 C, enfriando)
 };
 const int N_LEDS = sizeof(MAPA) / sizeof(MAPA[0]);
 const int IDX_DP12 = 21, IDX_DP23 = 22, IDX_MENOS = 23, IDX_C = 25;
-const int IDX_HEAT = 29;
-const int IDX_COOL = 26;
+const int IDX_HEAT = 26;
+const int IDX_COOL = 29;
 
 // Resultado de decodificar una ventana
 struct Lectura {
@@ -720,62 +721,102 @@ static bool consultarVersion(String& version, String& sha, uint32_t& tam) {
   return version.length() > 0;
 }
 
+// Descarga con reanudacion: si se corta (un rele que conmuta puede tirar el WiFi unos
+// segundos), espera a que vuelva la red y pide el resto con "Range: bytes=N-" en vez de
+// empezar de cero. GitHub Pages acepta rangos (responde 206).
+const int      OTA_MAX_CORTES   = 20;
+const uint32_t OTA_SIN_DATOS_MS = 15000;   // sin datos este tiempo = conexion muerta
+const uint32_t OTA_ESPERA_WIFI_MS = 90000; // esperar que vuelva el WiFi antes de reanudar
+
 static bool descargarFirmware(const String& shaEsperado, uint32_t tamEsperado) {
   if (shaEsperado.length() != 64) { otaLog("version.json sin sha256 valido, cancelado"); return false; }
-  WiFiClientSecure cli;
-  HTTPClient http;
-  prepararHttp(cli, http);
-  if (!http.begin(cli, OTA_URL_BIN)) { otaLog("no pude abrir la URL del firmware"); return false; }
-  int code = http.GET();
-  if (code != 200) { otaErrorHttp("firmware.bin", code, cli); http.end(); return false; }
-  int total = http.getSize();
-  if (total <= 0 || (tamEsperado && (uint32_t)total != tamEsperado)) {
-    otaLog("tamano inesperado (%d)", total);
-    http.end();
-    return false;
-  }
-  if (!Update.begin(total)) { otaLog("no hay espacio: %s", Update.errorString()); http.end(); return false; }
 
   mbedtls_md_context_t md;
   mbedtls_md_init(&md);
   mbedtls_md_setup(&md, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
   mbedtls_md_starts(&md);
 
-  WiFiClient* s = http.getStreamPtr();
   static uint8_t buf[2048];
-  int escrito = 0, ultimoPct = -1;
-  uint32_t tUltimoDato = millis(), tUltimoPub = 0;
-  bool ok = true;
-  while (escrito < total) {
-    size_t disp = s->available();
-    if (disp) {
-      int n = s->readBytes(buf, min(disp, sizeof(buf)));
-      if (n <= 0) continue;
-      if (Update.write(buf, n) != (size_t)n) { otaLog("error escribiendo: %s", Update.errorString()); ok = false; break; }
-      mbedtls_md_update(&md, buf, n);
-      escrito += n;
-      tUltimoDato = millis();
-      int pct = (int)((int64_t)escrito * 100 / total);
-      if (pct != ultimoPct && (millis() - tUltimoPub > 2000 || escrito == total)) {
-        ultimoPct = pct;
-        tUltimoPub = millis();
-        otaLog("%d%%", pct);
-      }
-    } else {
-      if (!s->connected() || millis() - tUltimoDato > 20000) {
-        otaLog("se corto la descarga en %d de %d bytes", escrito, total);
-        ok = false;
+  int total = (int)tamEsperado, escrito = 0, ultimoPct = -1;
+  bool empezado = false, fallo = false;
+  uint32_t tUltimoPub = 0;
+
+  for (int corte = 0; corte <= OTA_MAX_CORTES && !fallo; corte++) {
+    if (corte > 0) {
+      uint32_t t0 = millis();
+      while (WiFi.status() != WL_CONNECTED && millis() - t0 < OTA_ESPERA_WIFI_MS) delay(200);
+      if (WiFi.status() != WL_CONNECTED) { otaLog("sin WiFi, cancelado"); break; }
+      delay(1000);
+      otaLog("reanudando en %d de %d (corte %d)", escrito, total, corte);
+    }
+    WiFiClientSecure cli;
+    HTTPClient http;
+    prepararHttp(cli, http);
+    if (!http.begin(cli, OTA_URL_BIN)) { otaLog("no pude abrir la URL del firmware"); continue; }
+    if (escrito > 0) http.addHeader("Range", "bytes=" + String(escrito) + "-");
+    int code = http.GET();
+    if (code == 200 && escrito > 0) {
+      // el server ignoro el rango: empezar de cero
+      otaLog("el server no acepto el rango, empiezo de cero");
+      Update.abort();
+      empezado = false;
+      escrito = 0;
+      mbedtls_md_starts(&md);
+    } else if (!(code == 200 || (code == 206 && escrito > 0))) {
+      otaErrorHttp("firmware.bin", code, cli);
+      http.end();
+      continue;
+    }
+    if (!empezado) {
+      int tam = http.getSize();
+      if (tam <= 0 || (tamEsperado && (uint32_t)tam != tamEsperado)) {
+        otaLog("tamano inesperado (%d)", tam);
+        http.end();
+        fallo = true;
         break;
       }
-      delay(5);
+      total = tam;
+      if (!Update.begin(total)) { otaLog("no hay espacio: %s", Update.errorString()); http.end(); fallo = true; break; }
+      empezado = true;
     }
+
+    WiFiClient* s = http.getStreamPtr();
+    uint32_t tUltimoDato = millis();
+    while (escrito < total) {
+      size_t disp = s->available();
+      if (disp) {
+        int n = s->readBytes(buf, min(disp, (size_t)min(sizeof(buf), (size_t)(total - escrito))));
+        if (n <= 0) continue;
+        if (Update.write(buf, n) != (size_t)n) { otaLog("error escribiendo: %s", Update.errorString()); fallo = true; break; }
+        mbedtls_md_update(&md, buf, n);
+        escrito += n;
+        tUltimoDato = millis();
+        int pct = (int)((int64_t)escrito * 100 / total);
+        if (pct != ultimoPct && (millis() - tUltimoPub > 2000 || escrito == total)) {
+          ultimoPct = pct;
+          tUltimoPub = millis();
+          otaLog("%d%%", pct);
+        }
+      } else {
+        if (!s->connected() || millis() - tUltimoDato > OTA_SIN_DATOS_MS) {
+          otaLog("se corto la descarga en %d de %d bytes", escrito, total);
+          break;
+        }
+        delay(5);
+      }
+    }
+    http.end();
+    if (empezado && escrito >= total) break;
   }
-  http.end();
 
   uint8_t dig[32];
   mbedtls_md_finish(&md, dig);
   mbedtls_md_free(&md);
-  if (!ok) { Update.abort(); return false; }
+  if (fallo || !empezado || escrito < total) {
+    if (empezado) Update.abort();
+    otaLog("descarga incompleta, reintento mas tarde");
+    return false;
+  }
 
   char hex[65];
   for (int i = 0; i < 32; i++) sprintf(hex + 2 * i, "%02x", dig[i]);
@@ -804,22 +845,20 @@ static void buscarActualizacion(bool forzar) {
   disableLoopWDT();             // la descarga tarda mas que el watchdog de loop
   String version, sha;
   uint32_t tam = 0;
-  if (consultarVersion(version, sha, tam)) {
+  uint32_t proxima = OTA_CADA_MS;
+  if (!consultarVersion(version, sha, tam)) proxima = OTA_REINTENTO_MS;
+  else {
     Serial.printf("OTA: version actual %s, en GitHub %s\n", FIRMWARE_VERSION, version.c_str());
     if (forzar || versionMasNueva(version, FIRMWARE_VERSION)) {
       otaLog("actualizando %s -> %s", FIRMWARE_VERSION, version.c_str());
-      // si sale bien reinicia y no vuelve; si se corta, reintenta desde cero
-      for (int intento = 1; intento <= 3; intento++) {
-        if (intento > 1) { otaLog("reintento %d de 3", intento); delay(3000); }
-        descargarFirmware(sha, tam);
-        if (WiFi.status() != WL_CONNECTED) break;
-      }
+      // si sale bien reinicia y no vuelve; si no, se reintenta en 10 min (no en 6 h)
+      if (!descargarFirmware(sha, tam)) proxima = OTA_REINTENTO_MS;
     } else {
       otaLog("al dia (%s)", FIRMWARE_VERSION);
     }
   }
   enableLoopWDT();
-  tProxOta = millis() + OTA_CADA_MS;
+  tProxOta = millis() + proxima;
 }
 
 // Diagnostico remoto (con 220 V no se puede usar el USB): publica en <prefijo>/diag
