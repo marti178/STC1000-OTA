@@ -96,21 +96,26 @@ data class DeviceState(
     val outputs: Outputs? = null,
     /** Cuándo (epoch s) llegó algo EN VIVO del equipo (temperatura, info o salidas, no retenido). */
     val lastSignalAtSec: Long? = null,
+    /** Desde cuándo (epoch s) la app está conectada y escuchando: arranca el plazo de verificación. */
+    val watchSinceSec: Long? = null,
     /** Cuándo (epoch s) llegó por última vez una temperatura EN VIVO (no retenida). */
     val lastLiveAtSec: Long? = null,
 )
 
-/** Segundos sin señal en vivo a partir de los cuales ya no se da por seguro que el equipo está vivo. */
-const val SIGNAL_FRESH_SEC = 90L
+/** Segundos sin datos en vivo tras los cuales el equipo se da por caido (publica cada 60 s; keepalive 30 s). */
+const val SIGNAL_FRESH_SEC = 75L
 
 /**
- * ¿Está el equipo en línea? El `estado` retenido puede quedar en "offline" por una carrera con el will de MQTT,
- * así que cualquier dato en vivo reciente cuenta como prueba de vida. null = no se sabe.
+ * ¿Está el equipo en línea? Criterio estricto: solo cuenta lo recibido EN VIVO (los retenidos pueden ser viejos).
+ * true = llegó algo en los últimos [SIGNAL_FRESH_SEC] s; false = no llegó nada o el broker avisó que cayó;
+ * null = todavía verificando (recién se conectó la app y no pasó el plazo).
  */
 fun DeviceState.isOnline(nowSec: Long): Boolean? {
     val signal = lastSignalAtSec
     if (signal != null && nowSec - signal <= SIGNAL_FRESH_SEC) return true
-    return online
+    if (online == false) return false
+    val since = watchSinceSec ?: return false
+    return if (nowSec - since <= SIGNAL_FRESH_SEC) null else false
 }
 
 /** Una línea del registro de conexión (solo en memoria, para diagnóstico). */

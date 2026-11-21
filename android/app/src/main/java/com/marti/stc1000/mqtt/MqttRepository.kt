@@ -188,6 +188,7 @@ class MqttRepository(context: Context) {
                 MqttSupport.connect(c, s)
                 topics.forEach { MqttSupport.subscribe(c, s.topic(it)) }
                 connectedAtMs = System.currentTimeMillis()
+                _device.update { it.copy(watchSinceSec = System.currentTimeMillis() / 1000) }
                 _connection.value = ConnectionState.Connected
                 logEvent("Conectado y suscripto")
 

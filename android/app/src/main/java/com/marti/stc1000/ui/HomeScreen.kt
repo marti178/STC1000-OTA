@@ -175,7 +175,7 @@ private fun HeroCard(state: MainUiState) {
     val ageSec = liveAgeSec(state)
     val stale = ageSec != null && ageSec > STALE_AFTER_SEC
     val connected = state.connection == ConnectionState.Connected
-    val online = device.isOnline(state.nowSec)
+    val online = device.isOnline(rememberClockSec())
     val outOfRange = state.prefs.rangeEnabled && temp != null &&
         (temp < state.prefs.rangeMin || temp > state.prefs.rangeMax)
 
@@ -256,12 +256,14 @@ private fun HeroCard(state: MainUiState) {
                         !connected -> "Sin conexión al server"
                         online == true -> "En línea"
                         online == false -> "Sin conexión"
+                        online == null -> "Verificando…"
                         else -> "Estado desconocido"
                     },
                     dot = when {
                         !connected -> Color(0xFFFFD27A)
                         online == true -> Color(0xFF7CF2B4)
                         online == false -> Color(0xFFFF9C94)
+                        online == null -> Color(0xFFFFD27A)
                         else -> Color.White.copy(alpha = 0.6f)
                     },
                 )

@@ -59,6 +59,7 @@ fun DeviceScreen(
     val connected = state.connection == ConnectionState.Connected
     val d = state.device
     val info: DeviceInfo? = d.info
+    val clock = rememberClockSec()
 
     Column(
         modifier
@@ -72,7 +73,8 @@ fun DeviceScreen(
             Column(Modifier.padding(16.dp)) {
                 Text("Estado", style = MaterialTheme.typography.titleMedium)
                 val rows = buildList {
-                    add("Estado" to when (d.isOnline(state.nowSec)) { true -> "En línea"; false -> "Sin conexión"; null -> "Desconocido" })
+                    add("Estado" to when (d.isOnline(clock)) { true -> "En línea"; false -> "Sin conexión"; null -> "Verificando…" })
+                    d.lastSignalAtSec?.let { add("Última señal" to Format.age((clock - it).coerceAtLeast(0))) }
                     add("Firmware" to (d.firmware ?: info?.version ?: "—"))
                     add("Dirección IP" to (info?.ip ?: "—"))
                     add("Encendido hace" to (info?.uptimeSec?.let { uptime(it) } ?: "—"))

@@ -79,9 +79,10 @@ fun DevicePill(state: MainUiState) {
     val st = MaterialTheme.status
     val cs = MaterialTheme.colorScheme
     val known = state.connection == ConnectionState.Connected
-    val online = state.device.isOnline(state.nowSec)
+    val online = state.device.isOnline(rememberClockSec())
     val (label, dot, bg) = when {
-        !known || online == null -> Triple("—", cs.outline, cs.surfaceVariant)
+        !known -> Triple("—", cs.outline, cs.surfaceVariant)
+        online == null -> Triple("Verificando…", st.warn, st.warnContainer)
         online == true -> Triple("En línea", st.ok, st.okContainer)
         else -> Triple("Sin conexión", cs.error, cs.errorContainer)
     }

@@ -165,15 +165,21 @@ class OutputsTest {
 }
 
 class DeviceOnlineTest {
-    private fun d(online: Boolean?, signal: Long?) =
-        DeviceState(online = online, lastSignalAtSec = signal)
+    private fun d(online: Boolean?, signal: Long?, since: Long? = null) =
+        DeviceState(online = online, lastSignalAtSec = signal, watchSinceSec = since)
 
     @Test
-    fun estadoOfflineViejoPeroConDatosEnVivoEsEnLinea() {
-        assertEquals(true, d(false, 950).isOnline(1000))
-        assertEquals(false, d(false, 800).isOnline(1000))
-        assertEquals(true, d(true, null).isOnline(1000))
-        assertEquals(null, d(null, null).isOnline(1000))
+    fun soCuentaLoRecibidoEnVivoYRecienteSeguro() {
+        assertEquals(true, d(false, 950).isOnline(1000))   // dato en vivo manda sobre un offline viejo
+        assertEquals(false, d(true, 900, 100).isOnline(1000)) // "online" retenido sin datos: ya no alcanza
+        assertEquals(false, d(null, null).isOnline(1000))
+    }
+
+    @Test
+    fun alConectarSeVerificaPorUnPlazoYSiElBrokerDiceOfflineEsOffline() {
+        assertEquals(null, d(true, null, 980).isOnline(1000))
+        assertEquals(false, d(true, null, 900).isOnline(1000))
+        assertEquals(false, d(false, null, 980).isOnline(1000))
     }
 }
 
