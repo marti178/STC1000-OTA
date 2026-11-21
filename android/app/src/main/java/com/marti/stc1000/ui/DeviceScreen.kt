@@ -79,6 +79,8 @@ fun DeviceScreen(
                     add("Reconexiones MQTT" to (info?.mqttReconnects?.toString() ?: "—"))
                     info?.unknown?.takeIf { it.isNotEmpty() }?.let { add("Desconocidos" to it) }
                     d.ota?.takeIf { it.isNotEmpty() }?.let { add("Actualización" to it) }
+                    info?.txDbm?.let { add("Potencia de transmisión" to (if (it % 1.0 == 0.0) it.toInt().toString() else it.toString().replace('.', ',')) + " dBm") }
+                    d.outputs?.let { add("Termostato" to outputsText(it, withIdle = true)) }
                 }
                 rows.forEachIndexed { i, (k, v) ->
                     if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

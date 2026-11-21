@@ -136,3 +136,28 @@ class ChartZoomTest {
         assertEquals(null, w)
     }
 }
+
+class OutputsTest {
+    @Test
+    fun salidasConFrioDesconocido() {
+        val o = com.marti.stc1000.mqtt.Outputs.parse("""{"calor":"on","frio":null}""")!!
+        assertEquals(com.marti.stc1000.mqtt.OutputState.ON, o.heat)
+        assertEquals(null, o.cool)
+        assertEquals("Calentando", com.marti.stc1000.ui.outputsText(o, false))
+    }
+
+    @Test
+    fun reposoYEspera() {
+        val off = com.marti.stc1000.mqtt.Outputs.parse("""{"calor":"off","frio":null}""")!!
+        assertEquals("Reposo", com.marti.stc1000.ui.outputsText(off, false))
+        val wait = com.marti.stc1000.mqtt.Outputs.parse("""{"calor":"parpadea","frio":"off"}""")!!
+        assertEquals("Calor en espera", com.marti.stc1000.ui.outputsText(wait, false))
+        assertEquals(null, com.marti.stc1000.mqtt.Outputs.parse("basura"))
+    }
+
+    @Test
+    fun avanceDelOta() {
+        assertEquals(42, com.marti.stc1000.mqtt.otaPercent("42%"))
+        assertEquals(null, com.marti.stc1000.mqtt.otaPercent("listo, reiniciando"))
+    }
+}

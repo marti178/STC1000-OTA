@@ -159,7 +159,7 @@ class MqttRepository(context: Context) {
         var lastStartMs = 0L
         // historial = últimas 24 h (lo publica el ESP32); historial_largo = hasta 30 días (lo publica el server).
         val topics = listOf(
-            "estado", "temperatura", "display", "firmware", "info", "historial", "historial_largo", "ota",
+            "estado", "temperatura", "display", "firmware", "info", "salidas", "historial", "historial_largo", "ota",
         )
         while (true) {
             if (!net.online.value) {
@@ -254,9 +254,15 @@ class MqttRepository(context: Context) {
                 }
             }
             "display" -> _device.update { it.copy(display = text.trim()) }
-            "firmware" -> _device.update { it.copy(firmware = text.trim()) }
+            // Si cambia la version, la actualizacion termino: se borra el avance.
+            "firmware" -> _device.update { d ->
+                val v = text.trim()
+                if (d.firmware != null && d.firmware != v) d.copy(firmware = v, ota = null, otaAtSec = null) else d.copy(firmware = v)
+            }
+            "salidas" -> Outputs.parse(text)?.let { o -> _device.update { it.copy(outputs = o) } }
             "info" -> DeviceInfo.parse(text)?.let { i -> _device.update { it.copy(info = i) } }
-            "ota" -> _device.update { it.copy(ota = text.trim()) }
+            // El OTA no es retenido: un retenido viejo no dice nada del momento actual.
+            "ota" -> _device.update { it.copy(ota = text.trim(), otaAtSec = if (retained) it.otaAtSec else now) }
             // El historial largo puede pesar decenas de KB: se parsea y guarda fuera del hilo de red.
             "historial", "historial_largo" -> scope.launch {
                 val h = HistoryParser.parse(text) ?: return@launch

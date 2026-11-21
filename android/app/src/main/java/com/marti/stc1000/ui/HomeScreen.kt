@@ -42,6 +42,9 @@ import com.marti.stc1000.domain.Format
 import com.marti.stc1000.domain.Period
 import com.marti.stc1000.domain.Stats
 import com.marti.stc1000.mqtt.ConnectionState
+import com.marti.stc1000.mqtt.OutputState
+import com.marti.stc1000.mqtt.otaPercent
+import androidx.compose.material3.LinearProgressIndicator
 
 private const val STALE_AFTER_SEC = 15 * 60L
 private const val SPARK_WINDOW_SEC = 3 * 3600L
@@ -63,6 +66,7 @@ fun HomeScreen(
             ConnectionPill(state.connection, state.settings.isConfigured)
         }
         ProblemBanner(state.connection, state.loaded && !state.settings.isConfigured, onRetry)
+        OtaBanner(state)
         RangeBanner(state)
         HeroCard(state)
         ChartCard(state, onPeriod)
@@ -99,6 +103,32 @@ private fun ProblemBanner(conn: ConnectionState, notConfigured: Boolean, onRetry
         }
     }
 }
+
+/** Avance de la actualizacion del firmware; se oculta tras 1 min sin mensajes. */
+@Composable
+private fun OtaBanner(state: MainUiState) {
+    val text = state.device.ota?.takeIf { it.isNotBlank() } ?: return
+    val at = state.device.otaAtSec ?: return
+    if (state.connection != ConnectionState.Connected || state.nowSec - at > OTA_SHOW_SEC) return
+    val pct = otaPercent(text)
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(cs.secondaryContainer, MaterialTheme.shapes.medium)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            if (pct != null) "Actualizando el equipo… $pct %" else "Equipo: $text",
+            style = MaterialTheme.typography.bodyMedium,
+            color = cs.onSecondaryContainer,
+        )
+        if (pct != null) LinearProgressIndicator(progress = { pct / 100f }, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+private const val OTA_SHOW_SEC = 60L
 
 /** Aviso cuando la temperatura actual está fuera del rango deseado (si está activado en Preferencias). */
 @Composable
@@ -237,6 +267,22 @@ private fun HeroCard(state: MainUiState) {
                     if (ageSec != null) Format.age(ageSec) else "Sin datos",
                     dot = if (stale) Color(0xFFFFD27A) else null,
                 )
+                // Que hace el termostato: solo con datos al dia y el equipo en linea.
+                val outs = device.outputs
+                if (connected && device.online == true && outs != null) {
+                    val text = outputsText(outs, withIdle = false)
+                    if (text.isNotEmpty()) {
+                        HeroChip(
+                            text,
+                            dot = when {
+                                outs.heat == OutputState.ON -> Color(0xFFFFB066)
+                                outs.cool == OutputState.ON -> Color(0xFF8CC8FF)
+                                outs.heat == OutputState.BLINK || outs.cool == OutputState.BLINK -> Color(0xFFFFD27A)
+                                else -> null
+                            },
+                        )
+                    }
+                }
                 state.trend?.let { d ->
                     val arrow = when {
                         d > 0.2 -> "↑"
