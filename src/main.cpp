@@ -665,6 +665,7 @@ static void logMotivoWifi() {
   tLogMotivo = millis();
 }
 const uint32_t REPUBLICAR_MS        = 60UL * 1000;       // re-publicar aunque no cambie
+const uint32_t LATIDO_MS            = 20UL * 1000;       // info + "online": senal de vida para la app
 const uint32_t LECTURA_VIEJA_MS     = 30UL * 1000;       // sin lectura estable -> "sin lectura"
 
 static void publicarDescubrimientoHA() {
@@ -736,7 +737,10 @@ static void publicarValores(bool forzar) {
     ok = mqtt.publish(tTemp.c_str(), b, true) && ok;
     pubTemp = estable.temp;
   } else {
-    pubTemp = NAN;   // display en error (LLL, HHH...) o apagado: no se publica temperatura
+    // display en error (LLL, HHH...), sin lectura o apagado: se borra la temperatura
+    // retenida (mensaje vacio) para que nadie tome como actual un valor viejo
+    if (!isnan(pubTemp) || forzar) mqtt.publish(tTemp.c_str(), (const uint8_t*)"", 0, true);
+    pubTemp = NAN;
   }
   if (ok) publicoAlgo = true;
   tPubValores = millis();
@@ -766,7 +770,7 @@ static void alRecibir(char* topic, byte* payload, unsigned int len) {
 }
 
 static void conectarMqtt() {
-  if (millis() < tProxMqtt) return;
+  if ((int32_t)(millis() - tProxMqtt) < 0) return;   // resta con signo: anda tras los 49 dias
   if (cfg.mqttHost.length() == 0) { tProxMqtt = millis() + 60000; return; }
   bool tls = mqttConTls();
   Serial.printf("MQTT: conectando a %s:%u%s ...\n", cfg.mqttHost.c_str(), cfg.mqttPort, tls ? " (TLS)" : "");
@@ -853,6 +857,12 @@ static bool consultarVersion(String& version, String& sha, uint32_t& tam) {
   WiFiClientSecure cli;
   HTTPClient http;
   prepararHttp(cli, http);
+  // La consulta bloquea el loop: con timeouts cortos el peor caso (~30 s) queda por
+  // debajo de los 45 s en que el broker da por muerto al cliente (keepalive 30 s)
+  cli.setHandshakeTimeout(12);
+  http.setConnectTimeout(8000);
+  http.setTimeout(8000);
+  if (mqtt.connected()) mqtt.loop();
   if (!http.begin(cli, OTA_URL_VERSION)) { otaLog("no pude abrir la URL de version"); return false; }
   int code = http.GET();
   if (code != 200) {
@@ -1055,10 +1065,60 @@ static void publicarLog() {
   mqtt.publish(t.c_str(), "--- fin del log ---");
 }
 
+// Prueba de potencia (comando TX)
+const float    TX_MIN_DBM  = 8.5f;    // con menos el router no escucha bien al ESP32
+const float    TX_MAX_DBM  = 13.0f;   // con 15 dBm esta placa no conecta
+const uint32_t TX_PRUEBA_MS = 2UL * 60 * 1000;
+bool     txEnPrueba = false;
+uint8_t  txAnterior = TX_CUARTOS_DBM;
+uint32_t tTxCambio = 0;
+
+static void revisarPruebaTx() {
+  if (!txEnPrueba || millis() - tTxCambio < TX_PRUEBA_MS) return;
+  txEnPrueba = false;
+  if (mqtt.connected() && millis() - tConexionMqtt > TX_PRUEBA_MS / 2) {
+    guardarConfig();
+    logEvento("TX %.2f dBm confirmado y guardado", cfg.txCuartos / 4.0f);
+  } else {
+    cfg.txCuartos = txAnterior;
+    WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
+    logEvento("TX: sin conexion estable con la potencia nueva, vuelvo a %.2f dBm",
+              cfg.txCuartos / 4.0f);
+  }
+}
+
+// Comandos con vencimiento: "REBOOT@1795219181" (epoch UTC de cuando se mando). Si tiene
+// mas de CMD_VENCE_S se ignora: un comando retenido no se ejecuta horas despues, al volver
+// el equipo. Sin hora valida, los comandos que reinician o cambian algo se ignoran (la
+// app los puede volver a mandar); CHECK, LOG y MATRIZ se ejecutan igual. Sin "@" (a mano,
+// mosquitto_pub) se ejecutan siempre, como antes.
+const uint32_t CMD_VENCE_S = 5 * 60;
+
+static bool comandoVencido(String& c) {
+  int at = c.indexOf('@');
+  if (at < 0) return false;
+  uint32_t enviado = strtoul(c.c_str() + at + 1, nullptr, 10);
+  c = c.substring(0, at);
+  c.trim();
+  bool inocuo = c == "CHECK" || c == "LOG" || c == "MATRIZ";
+  if (!horaValida()) {
+    if (inocuo) return false;
+    logEvento("comando %s ignorado: sin hora para saber si esta vencido", c.c_str());
+    return true;
+  }
+  int64_t edad = (int64_t)time(nullptr) - (int64_t)enviado;
+  if (edad > (int64_t)CMD_VENCE_S) {
+    logEvento("comando %s ignorado: tiene %ld s", c.c_str(), (long)edad);
+    return true;
+  }
+  return false;
+}
+
 static void ejecutarComando(String c) {
   c.trim();
   c.toUpperCase();
   Serial.printf("Comando: %s\n", c.c_str());
+  if (comandoVencido(c)) return;
   if (c == "MATRIZ") publicarMatriz();
   else if (c == "LOG") publicarLog();
   else if (c == "LOGBORRAR") {
@@ -1066,12 +1126,20 @@ static void ejecutarComando(String c) {
     logEvento("log borrado por comando");
   }
   else if (c.startsWith("TX ")) {
-    // potencia WiFi en dBm, ej. "TX 8.5"; se guarda en la flash y se aplica ya
+    // Potencia WiFi en dBm, ej. "TX 11". Solo dentro del rango probado en este equipo, y
+    // a prueba: se aplica ya pero se guarda en la flash recien si el MQTT sigue andando
+    // TX_PRUEBA_MS despues. Si se pierde la conexion, vuelve sola a la anterior (y como
+    // no se guardo, un reinicio tambien la deshace).
     float dbm = c.substring(3).toFloat();
-    if (dbm >= 2 && dbm <= 20) {
-      cfg.txCuartos = constrain((int)lroundf(dbm * 4), 8, 80);
-      guardarConfig();
+    if (dbm < TX_MIN_DBM || dbm > TX_MAX_DBM) {
+      logEvento("TX %.2f dBm rechazado (rango %.1f a %.1f)", dbm, TX_MIN_DBM, TX_MAX_DBM);
+    } else {
+      if (!txEnPrueba) txAnterior = cfg.txCuartos;
+      cfg.txCuartos = (uint8_t)lroundf(dbm * 4);
       WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
+      txEnPrueba = true;
+      tTxCambio = millis();
+      logEvento("TX %.2f dBm a prueba (antes %.2f)", cfg.txCuartos / 4.0f, txAnterior / 4.0f);
       publicarInfo();
     }
   }
@@ -1162,7 +1230,7 @@ static void mantenerRed() {
   if (mqtt.connected()) {
     mqtt.loop();
     procesarComandoMqtt();
-    if (millis() - tPubInfo > REPUBLICAR_MS) {
+    if (millis() - tPubInfo > LATIDO_MS) {
       // re-afirmar "online": si hubo toma de sesion, el will del cliente viejo puede
       // llegar despues del "online" nuevo y dejar "offline" retenido
       mqtt.publish(tEstado.c_str(), "online", true);
@@ -1175,6 +1243,7 @@ static void mantenerRed() {
   }
 
   if (firmwarePendiente && publicoAlgo && millis() > CONFIRMAR_TRAS_MS) confirmarFirmware();
+  revisarPruebaTx();
   if ((int32_t)(millis() - tProxOta) >= 0) buscarActualizacion(false);
 }
 
@@ -1257,7 +1326,7 @@ static void comandoSet(const String& resto) {
   else if (clave == "mqtt_user") cfg.mqttUser = valor;
   else if (clave == "mqtt_pass") cfg.mqttPass = valor;
   else if (clave == "prefijo")   cfg.prefijo = valor.length() ? valor : String("stc1000");
-  else if (clave == "tx_dbm")    cfg.txCuartos = constrain((int)lroundf(valor.toFloat() * 4), 8, 80);
+  else if (clave == "tx_dbm")    cfg.txCuartos = constrain((int)lroundf(valor.toFloat() * 4), 34, 52);
   else { Serial.println("Clave desconocida (ssid, pass, mqtt_host, mqtt_port, mqtt_user, mqtt_pass, prefijo, tx_dbm)"); return; }
   guardarConfig();
   Serial.println("Guardado. Escribi 'reboot' para aplicar.");

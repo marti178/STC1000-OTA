@@ -51,17 +51,17 @@ Comandos del monitor serie: `s` (estado), `m` (matriz de pares), `r` (captura cr
 | Tópico | Contenido | Retenido |
 |---|---|---|
 | `stc1000/estado` | `online` / `offline` (last will) | sí |
-| `stc1000/temperatura` | ej. `27.3`, solo si el display muestra un número | sí |
+| `stc1000/temperatura` | ej. `27.3`, solo si el display muestra un número; si no (LLL, HHH, sin lectura) se publica **vacío** (borra el retenido) | sí |
 | `stc1000/display` | ej. `27.3 C`, `LLL`, `sin lectura` | sí |
 | `stc1000/firmware` | versión | sí |
-| `stc1000/info` | JSON: ip, rssi, uptime, versión, reconexiones, `tx_dbm`, `cortes_rapidos` (autocurado de la radio), `leds` (LEDs auxiliares prendidos o parpadeando) | sí |
+| `stc1000/info` | JSON: ip, rssi, uptime, versión, reconexiones, se publica cada **20 s** (latido, junto con `estado` `online`); `tx_dbm`, `cortes_rapidos` (autocurado de la radio), `leds` (LEDs auxiliares prendidos o parpadeando) | sí |
 | `stc1000/historial` | JSON con 24 h, una muestra cada 5 min (lo publica el ESP32) | sí |
 | `stc1000/historial_largo` | mismo formato, 30 días (lo publica el server, `server/historial/`) | sí |
 | `stc1000/salidas` | JSON `{"calor":"on\|parpadea\|off","frio":...}` según los LEDs Heat y Cool; `parpadea` = esperando la demora del compresor | sí |
 | `stc1000/ota` | avance de la actualización | no |
 | `stc1000/log` | respuesta a `LOG`: últimas ~6 KB del log persistente en la flash (arranques con su motivo, WiFi, MQTT, autocurado, OTA) | no |
 | `stc1000/diag` | respuesta a `MATRIZ`: por mil de cada par del display (5 tandas de 1 s) | no |
-| `stc1000/comando` | entrada: `CHECK`, `OTA`, `REBOOT`, `MATRIZ`, `LOG`, `LOGBORRAR`, `TX <dBm>` (potencia WiFi) | — |
+| `stc1000/comando` | entrada: `CHECK`, `OTA`, `REBOOT`, `MATRIZ`, `LOG`, `LOGBORRAR`, `TX <dBm>` (8,5 a 13; se guarda solo si el MQTT sigue andando 2 min, si no vuelve a la anterior). Opcional `@<epoch UTC>` al final (ej. `REBOOT@1795219181`): con más de 5 min se ignora | — |
 
 `historial`: `{"paso_s":300,"fin":<epoch UTC de la última muestra>,"t":[26.8,27.0,null,...]}`,
 de la más vieja a la más nueva; `null` = sin lectura en ese intervalo.
