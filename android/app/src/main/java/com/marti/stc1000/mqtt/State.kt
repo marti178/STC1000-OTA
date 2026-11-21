@@ -98,6 +98,8 @@ data class DeviceState(
     val lastSignalAtSec: Long? = null,
     /** Desde cuándo (epoch s) la app está conectada y escuchando: arranca el plazo de verificación. */
     val watchSinceSec: Long? = null,
+    /** Cuándo (epoch s) llegó un `estado` EN VIVO (no retenido); un "offline" en vivo más nuevo que la última señal manda. */
+    val estadoLiveAtSec: Long? = null,
     /** Cuándo (epoch s) llegó por última vez una temperatura EN VIVO (no retenida). */
     val lastLiveAtSec: Long? = null,
 )
@@ -112,6 +114,8 @@ const val SIGNAL_FRESH_SEC = 75L
  */
 fun DeviceState.isOnline(nowSec: Long): Boolean? {
     val signal = lastSignalAtSec
+    val liveOffline = online == false && estadoLiveAtSec != null && (signal == null || estadoLiveAtSec >= signal)
+    if (liveOffline) return false
     if (signal != null && nowSec - signal <= SIGNAL_FRESH_SEC) return true
     if (online == false) return false
     val since = watchSinceSec ?: return false

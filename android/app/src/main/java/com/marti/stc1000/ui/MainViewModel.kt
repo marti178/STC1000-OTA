@@ -61,7 +61,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val ticker = flow {
         while (true) {
             emit(System.currentTimeMillis() / 1000)
-            kotlinx.coroutines.delay(30_000)
+            kotlinx.coroutines.delay(5_000)
         }
     }
 
@@ -153,7 +153,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         true,
                         "Conectado al broker, pero el equipo no publicó su estado. ¿El prefijo «${s.prefix}» es el correcto?",
                     )
-                    else -> TestState.Done(true, "Conexión correcta. Equipo: ${estado.trim()}.")
+                    else -> TestState.Done(true, "Conexión correcta. Último estado guardado del equipo: ${estado.trim()}.")
                 }
             } catch (e: CancellationException) {
                 throw e

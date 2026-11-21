@@ -19,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -118,6 +119,8 @@ class MqttRepository(context: Context) {
         stopJob = scope.launch {
             delay(graceMs)
             synchronized(this@MqttRepository) {
+                // Si start() ya cancelo este trabajo (la app volvio justo ahora), no se corta la conexion nueva.
+                ensureActive()
                 supervisor?.cancel()
                 supervisor = null
                 net.stop()
@@ -188,7 +191,8 @@ class MqttRepository(context: Context) {
                 MqttSupport.connect(c, s)
                 topics.forEach { MqttSupport.subscribe(c, s.topic(it)) }
                 connectedAtMs = System.currentTimeMillis()
-                _device.update { it.copy(watchSinceSec = System.currentTimeMillis() / 1000) }
+                // Conexion nueva: las señales de la anterior ya no valen; se vuelve a verificar desde cero.
+                _device.update { it.copy(watchSinceSec = System.currentTimeMillis() / 1000, lastSignalAtSec = null, estadoLiveAtSec = null) }
                 _connection.value = ConnectionState.Connected
                 logEvent("Conectado y suscripto")
 
@@ -242,7 +246,15 @@ class MqttRepository(context: Context) {
         val name = topic.removePrefix(s.prefix.trim('/') + "/")
         val now = System.currentTimeMillis() / 1000
         when (name) {
-            "estado" -> _device.update { it.copy(online = text.trim().equals("online", ignoreCase = true)) }
+            "estado" -> _device.update {
+                val on = text.trim().equals("online", ignoreCase = true)
+                it.copy(
+                    online = on,
+                    // Un estado en vivo vale como señal si dice online; si dice offline, manda sobre señales anteriores.
+                    estadoLiveAtSec = if (retained) it.estadoLiveAtSec else now,
+                    lastSignalAtSec = if (!retained && on) now else it.lastSignalAtSec,
+                )
+            }
             "temperatura" -> {
                 val v = text.trim().replace(',', '.').toDoubleOrNull() ?: return
                 if (!Samples.isPlausible(v)) return
@@ -258,11 +270,11 @@ class MqttRepository(context: Context) {
                     Samples.fromLive(v, now, stepSec)?.let { addSamples(listOf(it), now) }
                 }
             }
-            "display" -> _device.update { it.copy(display = text.trim()) }
+            "display" -> _device.update { it.copy(display = text.trim(), lastSignalAtSec = if (retained) it.lastSignalAtSec else now) }
             // Si cambia la version, la actualizacion termino: se borra el avance.
             "firmware" -> _device.update { d ->
                 val v = text.trim()
-                if (d.firmware != null && d.firmware != v) d.copy(firmware = v, ota = null, otaAtSec = null, otaPct = null) else d.copy(firmware = v)
+                if (d.firmware != null && d.firmware != v) d.copy(firmware = v, ota = null, otaAtSec = null, otaPct = null, lastSignalAtSec = if (retained) d.lastSignalAtSec else now) else d.copy(firmware = v)
             }
             "salidas" -> Outputs.parse(text)?.let { o ->
                 _device.update { it.copy(outputs = o, lastSignalAtSec = if (retained) it.lastSignalAtSec else now) }
@@ -276,6 +288,7 @@ class MqttRepository(context: Context) {
                     ota = text.trim(),
                     otaAtSec = if (retained) it.otaAtSec else now,
                     otaPct = if (retained) it.otaPct else nextOtaPct(it.otaPct, text),
+                    lastSignalAtSec = if (retained) it.lastSignalAtSec else now,
                 )
             }
             // El historial largo puede pesar decenas de KB: se parsea y guarda fuera del hilo de red.

@@ -72,6 +72,13 @@ fun DeviceScreen(
         SurfaceCard {
             Column(Modifier.padding(16.dp)) {
                 Text("Estado", style = MaterialTheme.typography.titleMedium)
+                if (d.isOnline(clock) != true) {
+                    Text(
+                        "El equipo no está en línea: abajo se ven los datos del último mensaje recibido.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 val rows = buildList {
                     add("Estado" to when (d.isOnline(clock)) { true -> "En línea"; false -> "Sin conexión"; null -> "Verificando…" })
                     d.lastSignalAtSec?.let { add("Última señal" to Format.age((clock - it).coerceAtLeast(0))) }
@@ -187,7 +194,18 @@ fun DeviceScreen(
         AlertDialog(
             onDismissRequest = { pending = null },
             title = { Text(cmd.title) },
-            text = { Text(cmd.question) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(cmd.question)
+                    if (state.device.isOnline(clock) != true) {
+                        Text(
+                            "Ojo: el equipo no está en línea. El pedido queda guardado en el server y se ejecuta cuando vuelva, aunque pase un rato.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     pending = null

@@ -138,7 +138,8 @@ private fun RangeBanner(state: MainUiState) {
     val t = state.device.temperature ?: state.lastSample?.temp
     // No se juzga el rango con un dato viejo, un display con error o sin conexion al server.
     val ageSec = liveAgeSec(state)
-    val fresh = state.connection == ConnectionState.Connected && ageSec != null && ageSec <= STALE_AFTER_SEC
+    val fresh = state.connection == ConnectionState.Connected && ageSec != null && ageSec <= STALE_AFTER_SEC &&
+        state.device.isOnline(state.nowSec) == true
     if (!p.rangeEnabled || t == null || !fresh || Format.displayProblem(state.device.display) != null) return
     val unit = LocalTempUnit.current
     val (text, bad) = when {
@@ -287,7 +288,7 @@ private fun HeroCard(state: MainUiState) {
                         )
                     }
                 }
-                state.trend?.let { d ->
+                state.trend?.takeIf { online == true }?.let { d ->
                     val arrow = when {
                         d > 0.2 -> "↑"
                         d < -0.2 -> "↓"

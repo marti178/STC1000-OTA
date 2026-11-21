@@ -165,8 +165,17 @@ class OutputsTest {
 }
 
 class DeviceOnlineTest {
-    private fun d(online: Boolean?, signal: Long?, since: Long? = null) =
-        DeviceState(online = online, lastSignalAtSec = signal, watchSinceSec = since)
+    private fun d(online: Boolean?, signal: Long?, since: Long? = null, estadoLive: Long? = null) =
+        DeviceState(online = online, lastSignalAtSec = signal, watchSinceSec = since, estadoLiveAtSec = estadoLive)
+
+    @Test
+    fun unOfflineEnVivoMasNuevoQueLaSenalManda() {
+        assertEquals(false, d(false, 990, 100, estadoLive = 995).isOnline(1000))
+        // pero si despues llego una señal en vivo, el equipo volvio
+        assertEquals(true, d(false, 998, 100, estadoLive = 995).isOnline(1000))
+        // un offline retenido (sin marca de en vivo) no pisa una señal reciente
+        assertEquals(true, d(false, 990, 100).isOnline(1000))
+    }
 
     @Test
     fun soCuentaLoRecibidoEnVivoYRecienteSeguro() {
