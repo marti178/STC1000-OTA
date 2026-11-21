@@ -176,3 +176,14 @@ class DeviceOnlineTest {
         assertEquals(null, d(null, null).isOnline(1000))
     }
 }
+
+class OtaPctTest {
+    @Test
+    fun laBarraNoVuelveACeroConUnCorte() {
+        assertEquals(40, com.marti.stc1000.mqtt.nextOtaPct(null, "40%"))
+        assertEquals(40, com.marti.stc1000.mqtt.nextOtaPct(40, "se corto la descarga en 100 de 900 bytes"))
+        assertEquals(40, com.marti.stc1000.mqtt.nextOtaPct(40, "reanudando en 100 de 900 (corte 1)"))
+        assertEquals(null, com.marti.stc1000.mqtt.nextOtaPct(40, "actualizando 1.0.7 -> 1.0.8"))
+        assertEquals(100, com.marti.stc1000.mqtt.nextOtaPct(97, "listo, reiniciando"))
+    }
+}

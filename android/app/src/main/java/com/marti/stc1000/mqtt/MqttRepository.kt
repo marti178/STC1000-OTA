@@ -261,7 +261,7 @@ class MqttRepository(context: Context) {
             // Si cambia la version, la actualizacion termino: se borra el avance.
             "firmware" -> _device.update { d ->
                 val v = text.trim()
-                if (d.firmware != null && d.firmware != v) d.copy(firmware = v, ota = null, otaAtSec = null) else d.copy(firmware = v)
+                if (d.firmware != null && d.firmware != v) d.copy(firmware = v, ota = null, otaAtSec = null, otaPct = null) else d.copy(firmware = v)
             }
             "salidas" -> Outputs.parse(text)?.let { o ->
                 _device.update { it.copy(outputs = o, lastSignalAtSec = if (retained) it.lastSignalAtSec else now) }
@@ -270,7 +270,13 @@ class MqttRepository(context: Context) {
                 _device.update { it.copy(info = i, lastSignalAtSec = if (retained) it.lastSignalAtSec else now) }
             }
             // El OTA no es retenido: un retenido viejo no dice nada del momento actual.
-            "ota" -> _device.update { it.copy(ota = text.trim(), otaAtSec = if (retained) it.otaAtSec else now) }
+            "ota" -> _device.update {
+                it.copy(
+                    ota = text.trim(),
+                    otaAtSec = if (retained) it.otaAtSec else now,
+                    otaPct = if (retained) it.otaPct else nextOtaPct(it.otaPct, text),
+                )
+            }
             // El historial largo puede pesar decenas de KB: se parsea y guarda fuera del hilo de red.
             "historial", "historial_largo" -> scope.launch {
                 val h = HistoryParser.parse(text) ?: return@launch

@@ -111,7 +111,7 @@ private fun OtaBanner(state: MainUiState) {
     val text = state.device.ota?.takeIf { it.isNotBlank() } ?: return
     val at = state.device.otaAtSec ?: return
     if (state.connection != ConnectionState.Connected || state.nowSec - at > OTA_SHOW_SEC) return
-    val pct = otaPercent(text)
+    val pct = state.device.otaPct
     val cs = MaterialTheme.colorScheme
     Column(
         Modifier
@@ -121,7 +121,7 @@ private fun OtaBanner(state: MainUiState) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            if (pct != null) "Actualizando el equipo… $pct %" else "Equipo: $text",
+            if (otaPercent(text) != null) "Actualizando el equipo… $pct %" else if (pct != null) "Actualizando ($pct %): $text" else "Equipo: $text",
             style = MaterialTheme.typography.bodyMedium,
             color = cs.onSecondaryContainer,
         )

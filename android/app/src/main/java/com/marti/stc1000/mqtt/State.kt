@@ -70,6 +70,17 @@ data class Outputs(val heat: OutputState?, val cool: OutputState?) {
 fun otaPercent(text: String?): Int? =
     text?.trim()?.let { Regex("""^(\d{1,3})\s*%$""").find(it)?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0, 100) }
 
+/** Porcentaje que queda tras un mensaje de OTA: el del mensaje, 100 si terminó, ninguno si no hay actualización. */
+fun nextOtaPct(previous: Int?, text: String): Int? {
+    otaPercent(text)?.let { return it }
+    val t = text.trim().lowercase()
+    return when {
+        t.startsWith("listo") -> 100
+        t.startsWith("al dia") || t.startsWith("al día") || t.startsWith("actualizando") -> null
+        else -> previous
+    }
+}
+
 /** Último estado conocido del equipo, tal como llegó por MQTT. */
 data class DeviceState(
     val online: Boolean? = null,
@@ -80,6 +91,8 @@ data class DeviceState(
     val ota: String? = null,
     /** Cuándo (epoch s) llegó el último mensaje de OTA en vivo; sirve para ocultar el avance tras un rato. */
     val otaAtSec: Long? = null,
+    /** Último porcentaje de OTA conocido: se mantiene mientras llegan avisos de corte o reanudación. */
+    val otaPct: Int? = null,
     val outputs: Outputs? = null,
     /** Cuándo (epoch s) llegó algo EN VIVO del equipo (temperatura, info o salidas, no retenido). */
     val lastSignalAtSec: Long? = null,
