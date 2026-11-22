@@ -1077,15 +1077,26 @@ static void publicarMatriz() {
 }
 
 // Publica las ultimas ~6 KB del log en <prefijo>/log, en pedazos de ~1,5 KB (no retenido)
-static void publicarLog() {
+// Pedazos chicos: con el enlace con perdidas (visto en el acuario en 802.11b) una escritura
+// grande trababa el socket; WiFiClient reintenta ~10 s por escritura y 4 pedazos de 1,5 KB
+// pasaban los 30 s del watchdog (3 reinicios la noche del 21/11, siempre justo tras un LOG).
+// Ahora: 400 bytes, se alimenta el watchdog entre pedazos y se corta al primer fallo.
+static void publicarLog(unsigned bytes) {
   if (!mqtt.connected()) return;
-  String l = leerLog(6000);
+  String l = leerLog(bytes);
   String t = cfg.prefijo + "/log";
-  for (unsigned i = 0; i < l.length(); i += 1500) {
-    String parte = l.substring(i, min((unsigned)l.length(), i + 1500));
-    mqtt.publish(t.c_str(), parte.c_str());
+  uint32_t t0 = millis();
+  for (unsigned i = 0; i < l.length(); i += 400) {
+    String parte = l.substring(i, min((unsigned)l.length(), i + 400));
+    bool ok = mqtt.publish(t.c_str(), parte.c_str());
+    esp_task_wdt_reset();
+    if (!ok || !mqtt.connected() || millis() - t0 > 20000) {
+      logEvento("LOG: envio cortado en %u de %u bytes (%lu ms)", i, l.length(),
+                (unsigned long)(millis() - t0));
+      return;
+    }
     mqtt.loop();
-    delay(50);
+    delay(100);
   }
   mqtt.publish(t.c_str(), "--- fin del log ---");
 }
@@ -1171,7 +1182,7 @@ static bool comandoVencido(String& c) {
   uint32_t enviado = strtoul(c.c_str() + at + 1, nullptr, 10);
   c = c.substring(0, at);
   c.trim();
-  bool inocuo = c == "CHECK" || c == "LOG" || c == "MATRIZ";
+  bool inocuo = c == "CHECK" || c == "LOG" || c.startsWith("LOG ") || c == "MATRIZ";
   if (!horaValida()) {
     if (inocuo) return false;
     logEvento("comando %s ignorado: sin hora para saber si esta vencido", c.c_str());
@@ -1191,7 +1202,8 @@ static void ejecutarComando(String c) {
   Serial.printf("Comando: %s\n", c.c_str());
   if (comandoVencido(c)) return;
   if (c == "MATRIZ") publicarMatriz();
-  else if (c == "LOG") publicarLog();
+  else if (c == "LOG") publicarLog(6000);
+  else if (c.startsWith("LOG ")) publicarLog(constrain(c.substring(4).toInt(), 200, 12000));
   else if (c == "LOGBORRAR") {
     if (logOk) { LittleFS.remove("/log.txt"); LittleFS.remove("/log1.txt"); }
     logEvento("log borrado por comando");

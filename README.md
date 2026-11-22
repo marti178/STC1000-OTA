@@ -62,7 +62,7 @@ Comandos del monitor serie: `s` (estado), `m` (matriz de pares), `r` (captura cr
 | `stc1000/ota` | avance de la actualización | no |
 | `stc1000/log` | respuesta a `LOG`: últimas ~6 KB del log persistente en la flash (arranques con su motivo, WiFi, MQTT, autocurado, OTA) | no |
 | `stc1000/diag` | respuesta a `MATRIZ`: por mil de cada par del display (5 tandas de 1 s) | no |
-| `stc1000/comando` | entrada: `CHECK`, `OTA`, `REBOOT`, `MATRIZ`, `LOG`, `LOGBORRAR`, `TX <dBm>` (8,5 a 13; se guarda solo si el MQTT sigue andando 2 min, si no vuelve a la anterior), `PROTO B`, `PROTO BG` o `PROTO BGN` (modo WiFi a prueba 3 min; si queda estable se guarda; si pasan 10 min sin WiFi vuelve a BGN). Opcional `@<epoch UTC>` al final (ej. `REBOOT@1795219181`): con más de 5 min se ignora | — |
+| `stc1000/comando` | entrada: `CHECK`, `OTA`, `REBOOT`, `MATRIZ`, `LOG` (o `LOG <bytes>`, 200 a 12000; por defecto 6000, en pedazos de 400), `LOGBORRAR`, `TX <dBm>` (8,5 a 13; se guarda solo si el MQTT sigue andando 2 min, si no vuelve a la anterior), `PROTO B`, `PROTO BG` o `PROTO BGN` (modo WiFi a prueba 3 min; si queda estable se guarda; si pasan 10 min sin WiFi vuelve a BGN). Opcional `@<epoch UTC>` al final (ej. `REBOOT@1795219181`): con más de 5 min se ignora | — |
 
 `historial`: `{"paso_s":300,"fin":<epoch UTC de la última muestra>,"t":[26.8,27.0,null,...]}`,
 de la más vieja a la más nueva; `null` = sin lectura en ese intervalo.
