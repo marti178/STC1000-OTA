@@ -57,6 +57,7 @@
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
 #include <esp_phy_init.h>
+#include <esp_wifi.h>
 #include <LittleFS.h>
 #include <esp_task_wdt.h>
 #include <time.h>
@@ -858,8 +859,10 @@ static void prepararHttp(WiFiClientSecure& cli, HTTPClient& http) {
 // Error HTTP con el motivo de TLS si lo hay (ej. "SSL - Connection timed out")
 static void otaErrorHttp(const char* que, int code, WiFiClientSecure& cli) {
   char e[96] = "";
+  // el ultimo error de TLS puede ser viejo (de otra conexion): se muestra aparte del de HTTP
   if (code < 0) cli.lastError(e, sizeof(e));
-  otaLog("%s respondio HTTP %d %s (heap libre %u, bloque max %u)", que, code, e,
+  otaLog("%s respondio HTTP %d (%s; ultimo TLS: %s) (heap libre %u, bloque max %u)", que, code,
+         code < 0 ? HTTPClient::errorToString(code).c_str() : "-", e,
          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
@@ -1095,7 +1098,45 @@ bool     txEnPrueba = false;
 uint8_t  txAnterior = TX_CUARTOS_DBM;
 uint32_t tTxCambio = 0;
 
+// Prueba de protocolo WiFi (comando PROTO B|BG|BGN). No se guarda: un reinicio vuelve a b/g/n.
+// 802.11b (DSSS) aguanta mas ruido y senal baja que OFDM; sirve para ver si los cortes son
+// por tramas perdidas. Si el MQTT no queda estable en PROTO_PRUEBA_MS, vuelve a b/g/n solo.
+const uint32_t PROTO_PRUEBA_MS = 3UL * 60 * 1000;
+const uint8_t  PROTO_BGN = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N;
+uint8_t  protoActual = PROTO_BGN;
+bool     protoEnPrueba = false;
+uint32_t tProtoCambio = 0;
+
+static const char* nombreProto(uint8_t p) {
+  if (p == WIFI_PROTOCOL_11B) return "b";
+  if (p == (WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G)) return "bg";
+  return "bgn";
+}
+
+static void aplicarProto(uint8_t p) {
+  WiFi.disconnect(false, false);
+  delay(300);
+  esp_err_t r = esp_wifi_set_protocol(WIFI_IF_STA, p);
+  protoActual = p;
+  tFinOta = millis();   // el corte que provoca este cambio no cuenta como corte rapido
+  WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
+  WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
+  logEvento("WiFi: protocolo 802.11%s (resultado %d)", nombreProto(p), (int)r);
+}
+
+static void revisarPruebaProto() {
+  if (!protoEnPrueba || millis() - tProtoCambio < PROTO_PRUEBA_MS) return;
+  protoEnPrueba = false;
+  if (mqtt.connected() && millis() - tConexionMqtt > PROTO_PRUEBA_MS / 2) {
+    logEvento("WiFi: 802.11%s estable, queda hasta el proximo reinicio", nombreProto(protoActual));
+  } else {
+    logEvento("WiFi: 802.11%s sin conexion estable, vuelvo a b/g/n", nombreProto(protoActual));
+    aplicarProto(PROTO_BGN);
+  }
+}
+
 static void revisarPruebaTx() {
+  revisarPruebaProto();
   if (!txEnPrueba || millis() - tTxCambio < TX_PRUEBA_MS) return;
   txEnPrueba = false;
   if (mqtt.connected() && millis() - tConexionMqtt > TX_PRUEBA_MS / 2) {
@@ -1163,6 +1204,19 @@ static void ejecutarComando(String c) {
       tTxCambio = millis();
       logEvento("TX %.2f dBm a prueba (antes %.2f)", cfg.txCuartos / 4.0f, txAnterior / 4.0f);
       publicarInfo();
+    }
+  }
+  else if (c.startsWith("PROTO ")) {
+    String m = c.substring(6);
+    m.trim();
+    uint8_t p = m == "B" ? WIFI_PROTOCOL_11B
+              : m == "BG" ? (uint8_t)(WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G)
+              : m == "BGN" ? PROTO_BGN : 0;
+    if (!p) logEvento("PROTO %s rechazado (B, BG o BGN)", m.c_str());
+    else {
+      protoEnPrueba = p != PROTO_BGN;
+      tProtoCambio = millis();
+      aplicarProto(p);
     }
   }
   else if (c == "CHECK") buscarActualizacion(false);
@@ -1243,9 +1297,11 @@ static void mantenerRed() {
     if (tFinOta && millis() - tFinOta < 90000) { /* corte por el OTA: no cuenta */ }
     else if (millis() - tConexionMqtt < CORTE_RAPIDO_MS) cortesRapidos++;
     else cortesRapidos = 0;
-    logEvento("MQTT: se corto tras %lu s (estado %d, cortes rapidos seguidos %u, WiFi %s, RSSI %d)",
+    logEvento("MQTT: se corto tras %lu s (estado %d, cortes rapidos seguidos %u, WiFi %s, RSSI %d, "
+              "calor %s, frio %s)",
               (unsigned long)((millis() - tConexionMqtt) / 1000), mqtt.state(), cortesRapidos,
-              WiFi.status() == WL_CONNECTED ? "ok" : "caido", WiFi.RSSI());
+              WiFi.status() == WL_CONNECTED ? "ok" : "caido", WiFi.RSSI(),
+              auxEstado(IDX_HEAT), auxEstado(IDX_COOL));
     if (cortesRapidos >= 6) {
       logEvento("Radio: 6 cortes rapidos, borro la calibracion y reinicio");
       esp_phy_erase_cal_data_in_nvs();
