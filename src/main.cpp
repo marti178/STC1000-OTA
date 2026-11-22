@@ -1124,11 +1124,19 @@ static void aplicarProto(uint8_t p) {
   logEvento("WiFi: protocolo 802.11%s (resultado %d)", nombreProto(p), (int)r);
 }
 
+static void guardarProto(uint8_t p) {
+  Preferences pr;
+  pr.begin("wifi", false);
+  pr.putUChar("proto", p);
+  pr.end();
+}
+
 static void revisarPruebaProto() {
   if (!protoEnPrueba || millis() - tProtoCambio < PROTO_PRUEBA_MS) return;
   protoEnPrueba = false;
   if (mqtt.connected() && millis() - tConexionMqtt > PROTO_PRUEBA_MS / 2) {
-    logEvento("WiFi: 802.11%s estable, queda hasta el proximo reinicio", nombreProto(protoActual));
+    guardarProto(protoActual);
+    logEvento("WiFi: 802.11%s estable, guardado", nombreProto(protoActual));
   } else {
     logEvento("WiFi: 802.11%s sin conexion estable, vuelvo a b/g/n", nombreProto(protoActual));
     aplicarProto(PROTO_BGN);
@@ -1216,6 +1224,7 @@ static void ejecutarComando(String c) {
     else {
       protoEnPrueba = p != PROTO_BGN;
       tProtoCambio = millis();
+      if (p == PROTO_BGN) guardarProto(PROTO_BGN);
       aplicarProto(p);
     }
   }
@@ -1254,6 +1263,10 @@ static void mantenerRed() {
     uint32_t sinRed = millis() - tWifiPerdido;
     if (sinRed > REINICIO_SIN_WIFI_MS) {
       logEvento("WiFi: 10 min sin conexion, recalibro la radio y reinicio");
+      if (protoActual != PROTO_BGN) {
+        guardarProto(PROTO_BGN);   // por si el modo guardado es el problema
+        logEvento("WiFi: vuelvo a 802.11bgn");
+      }
       esp_phy_erase_cal_data_in_nvs();
       delay(100);
       ESP.restart();
@@ -1482,6 +1495,18 @@ void setup() {
   // Sin ahorro de energia: el equipo va enchufado, y el modem sleep traba las
   // descargas TCP largas (el OTA se frenaba a los ~96 KB)
   WiFi.setSleep(false);
+  {
+    // modo WiFi guardado con el comando PROTO (b/g/n si no hay)
+    Preferences pr;
+    pr.begin("wifi", true);
+    uint8_t p = pr.getUChar("proto", PROTO_BGN);
+    pr.end();
+    if (p == WIFI_PROTOCOL_11B || p == (WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G)) {
+      esp_wifi_set_protocol(WIFI_IF_STA, p);
+      protoActual = p;
+      logEvento("WiFi: protocolo guardado 802.11%s", nombreProto(p));
+    }
+  }
   if (cfg.ssid.length()) WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
   WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
   tWifiPerdido = millis();

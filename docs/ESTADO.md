@@ -63,9 +63,10 @@
   rápido; `salidas` en null si la lectura está vieja.
 - v1.2.0: watchdog del loop a 30 s (un publish con el enlace muriendo bloqueaba ~10 s).
 - v1.2.1: cada vez que rehace el WiFi escanea y anota con qué RSSI ve al router.
-- v1.2.2: comando `PROTO B|BG|BGN` (modo WiFi a prueba 3 min, no se guarda); cada corte MQTT
+- v1.2.2: comando `PROTO B|BG|BGN` (modo WiFi a prueba 3 min); cada corte MQTT
   anota el estado de los relés; el error HTTP del OTA con su nombre (el "PADLOCK" era un error
   TLS viejo: en realidad fue un timeout de lectura, -11).
+- v1.2.3: el modo de `PROTO` se guarda si queda estable; con 10 min sin WiFi vuelve a b/g/n.
 - **Router: 2,4 GHz del canal 1 (6 vecinos) al 11, 20 MHz** (2026-11-21).
 - **Diagnóstico 220 V / acuario (2026-11-21):**
   - Con v1.1.9 a 220 V en la mesa no asociaba (AUTH_EXPIRE, 4WAY_HANDSHAKE_TIMEOUT); por USB
@@ -80,7 +81,7 @@
   - Hipótesis abiertas (segunda opinión): ruido del equipo del acuario (driver de luces, bomba)
     por aire o por la línea; armado que desafina la antena (cables, sonda en el agua); bobinas de
     los relés colgando del 5V alimentado al revés por el LDO.
-- **En el equipo: v1.2.2, instalado en el acuario, 11 dBm.** (Antes, v1.1.3 con 8,5 dBm:) Prueba de relés (2026-11-21 01:05-01:12):
+- **En el equipo: v1.2.3, instalado en el acuario, 11 dBm, 802.11b.** En 802.11b (2 h 10 min, noche del 21 al 22): sin cortes del MQTT, ~1,5 % de pings perdidos. (Antes, v1.1.3 con 8,5 dBm:) Prueba de relés (2026-11-21 01:05-01:12):
   ~6 conmutaciones sin reinicios ni cortes del MQTT; el ping tiene cortes de 1 a 5 s (hasta 22 s)
   al conmutar. El OTA a 1.1.3 se hizo con un relé conmutando y volvió solo tras reiniciar.
 - Antes (v1.0.6, en banco): **en la LAN, publicando.** OTA automático verificado dos veces
