@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-Última actualización: 2026-11-21 (madrugada).
+Última actualización: 2026-11-21 (noche).
 
 ## Hecho y verificado
 
@@ -55,7 +55,32 @@
 - **Potencia: 11 dBm.** Con 8,5 dBm el router no escuchaba bien al ESP32 (AUTH_EXPIRE al
   arrancar, 42 % de pings perdidos); con 11 dBm, 3 % y sin reinicios ni brownout aunque
   conmuten los relés (prueba 2026-11-21 23:17-23:19 UTC).
-- **En el equipo: v1.1.7, instalado a 220 V, 11 dBm.** (Antes, v1.1.3 con 8,5 dBm:) Prueba de relés (2026-11-21 01:05-01:12):
+- v1.1.8: TX por MQTT solo de 8,5 a 13 dBm y a prueba (se guarda si el MQTT aguanta 2 min);
+  latido `info` + "online" cada 20 s; comandos con vencimiento `@<epoch>`; temperatura retenida
+  vacía cuando el display no muestra número; `millis()` con resta con signo (49 días).
+- v1.1.9: el rollback no cuenta los arranques por corte de luz o brownout y no reinstala sola la
+  versión descartada (`ota/bad_ver`); lo que pasa justo después de un OTA no cuenta como corte
+  rápido; `salidas` en null si la lectura está vieja.
+- v1.2.0: watchdog del loop a 30 s (un publish con el enlace muriendo bloqueaba ~10 s).
+- v1.2.1: cada vez que rehace el WiFi escanea y anota con qué RSSI ve al router.
+- v1.2.2: comando `PROTO B|BG|BGN` (modo WiFi a prueba 3 min, no se guarda); cada corte MQTT
+  anota el estado de los relés; el error HTTP del OTA con su nombre (el "PADLOCK" era un error
+  TLS viejo: en realidad fue un timeout de lectura, -11).
+- **Router: 2,4 GHz del canal 1 (6 vecinos) al 11, 20 MHz** (2026-11-21).
+- **Diagnóstico 220 V / acuario (2026-11-21):**
+  - Con v1.1.9 a 220 V en la mesa no asociaba (AUTH_EXPIRE, 4WAY_HANDSHAKE_TIMEOUT); por USB
+    conectaba en 3 s. Tras el OTA a 1.2.0 hecho por USB (borra y rehace la calibración con
+    alimentación limpia), 3 de 3 arranques a 220 V conectaron en 2-5 s. Teoría: había quedado
+    guardada una calibración mala hecha con alimentación ruidosa.
+  - En el acuario con v1.2.0: 20 min sin asociar, nunca NO_AP_FOUND (escucha al router, el
+    router no lo escucha a él). Con v1.2.1/1.2.2 en el acuario: asocia, RSSI −56 a −65. Los
+    primeros ~4 min el MQTT se cortó 5 veces a los 45-53 s (timeout del broker: lo que manda el
+    ESP32 no llega, el WiFi sigue asociado) con los dos relés apagados; después estable, con el
+    de frío prendido. Ping: 0-7 % de pérdida por minuto.
+  - Hipótesis abiertas (segunda opinión): ruido del equipo del acuario (driver de luces, bomba)
+    por aire o por la línea; armado que desafina la antena (cables, sonda en el agua); bobinas de
+    los relés colgando del 5V alimentado al revés por el LDO.
+- **En el equipo: v1.2.2, instalado en el acuario, 11 dBm.** (Antes, v1.1.3 con 8,5 dBm:) Prueba de relés (2026-11-21 01:05-01:12):
   ~6 conmutaciones sin reinicios ni cortes del MQTT; el ping tiene cortes de 1 a 5 s (hasta 22 s)
   al conmutar. El OTA a 1.1.3 se hizo con un relé conmutando y volvió solo tras reiniciar.
 - Antes (v1.0.6, en banco): **en la LAN, publicando.** OTA automático verificado dos veces
@@ -92,7 +117,7 @@
 ## Pendiente (en orden)
 
 1. **Instalación a 220 V: hecha, con cambios forzados.** La HLK-PM03 se quemó y el OB2222 murió:
-   hoy todo se alimenta con un módulo de 3,3 V y las bobinas de los relés salen del pin 5V de la
+   hoy todo se alimenta con una HLK-PM03 nueva (3,3 V al pin 3V3) y las bobinas de los relés salen del pin 5V de la
    Super Mini (con 3,3 V no conmutan). Eso provoca microcortes del WiFi. Mejoras pendientes de
    hardware: capacitor de 470-1000 µF en la alimentación del ESP32 y una fuente de 5 V aparte para
    los relés. Lo que sigue es el plan original, como referencia:
