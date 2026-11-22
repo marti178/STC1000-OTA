@@ -1210,6 +1210,18 @@ static void mantenerRed() {
                 (unsigned long)(sinRed / 1000), (int)WiFi.status());
       WiFi.disconnect(false, false);
       delay(300);
+      // Con que senal se ve al router desde aca: separa "senal debil" (RSSI bajo) de
+      // "el router no nos escucha por ruido" (RSSI bueno pero el saludo falla igual)
+      int n = WiFi.scanNetworks(false, false, false, 150, 0, cfg.ssid.c_str());
+      if (n > 0) {
+        int mejor = 0;
+        for (int i = 1; i < n; i++) if (WiFi.RSSI(i) > WiFi.RSSI(mejor)) mejor = i;
+        logEvento("WiFi: veo al router con RSSI %d dBm (canal %d, %d AP con ese nombre), TX %.2f dBm",
+                  (int)WiFi.RSSI(mejor), (int)WiFi.channel(mejor), n, cfg.txCuartos / 4.0f);
+      } else {
+        logEvento("WiFi: el escaneo no encontro al router (resultado %d)", n);
+      }
+      WiFi.scanDelete();
       WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
       WiFi.setTxPower((wifi_power_t)cfg.txCuartos);
     }
