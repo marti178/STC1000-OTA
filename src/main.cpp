@@ -1117,7 +1117,8 @@ static void publicarLog(unsigned bytes) {
 
 // Prueba de potencia (comando TX)
 const float    TX_MIN_DBM  = 8.5f;    // con menos el router no escucha bien al ESP32
-const float    TX_MAX_DBM  = 13.0f;   // con 15 dBm esta placa no conecta
+const float    TX_MAX_DBM  = 15.0f;   // con 15 dBm esta placa no conectaba (21/11, otra ubicacion): a prueba
+const float    TX_SEGURO_DBM = 13.0f; // probado estable (23/11); a esto vuelve si con mas se queda sin WiFi
 const uint32_t TX_PRUEBA_MS = 2UL * 60 * 1000;
 bool     txEnPrueba = false;
 uint8_t  txAnterior = TX_CUARTOS_DBM;
@@ -1296,6 +1297,11 @@ static void mantenerRed() {
         n = 0;
       }
       guardarReiniciosSinWifi(n);
+      if (cfg.txCuartos > (uint8_t)(TX_SEGURO_DBM * 4)) {
+        cfg.txCuartos = (uint8_t)(TX_SEGURO_DBM * 4);   // por si la potencia alta es el problema
+        guardarConfig();
+        logEvento("TX: vuelvo a %.2f dBm", TX_SEGURO_DBM);
+      }
       esp_phy_erase_cal_data_in_nvs();
       delay(100);
       ESP.restart();
