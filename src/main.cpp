@@ -639,6 +639,19 @@ volatile bool cmdPendiente = false;
 char     cmdBuf[32];
 
 const uint32_t REINICIO_SIN_WIFI_MS = 10UL * 60 * 1000;  // 10 min sin WiFi -> reinicio
+// Reinicios seguidos por 10 min sin WiFi (se guarda en la flash y vuelve a 0 al conectar el
+// MQTT). Solo despues de varios seguidos se abandona el modo guardado: un modo guardado ya
+// paso la prueba de 3 min, y los cortes largos suelen ser interferencia, no el modo.
+const uint8_t REINICIOS_PARA_BGN = 3;
+uint8_t reiniciosSinWifi = 0;
+
+static void guardarReiniciosSinWifi(uint8_t n) {
+  reiniciosSinWifi = n;
+  Preferences pr;
+  pr.begin("wifi", false);
+  pr.putUChar("sinwifi", n);
+  pr.end();
+}
 // Al enchufar a 220 V el primer intento de conexion queda trabado (estado 6) y la
 // reconexion automatica no lo destraba; rehaciendo la conexion conecta en segundos.
 const uint32_t REHACER_WIFI_MS      = 45UL * 1000;       // cada 45 s sin WiFi -> rehacer la conexion
@@ -802,6 +815,7 @@ static void conectarMqtt() {
     reconexionesMqtt++;
     tConexionMqtt = millis();
     mqttEstabaConectado = true;
+    if (reiniciosSinWifi) guardarReiniciosSinWifi(0);
     esperaMqtt = 2000;
     mqtt.publish(tEstado.c_str(), "online", true);
     mqtt.publish(tFirmware.c_str(), FIRMWARE_VERSION, true);
@@ -1274,11 +1288,14 @@ static void mantenerRed() {
     // setAutoReconnect se encarga. Si no vuelve: cada 45 s rehacer el WiFi de cero; a los 10 min borrar la calibracion de la radio y reiniciar.
     uint32_t sinRed = millis() - tWifiPerdido;
     if (sinRed > REINICIO_SIN_WIFI_MS) {
-      logEvento("WiFi: 10 min sin conexion, recalibro la radio y reinicio");
-      if (protoActual != PROTO_BGN) {
-        guardarProto(PROTO_BGN);   // por si el modo guardado es el problema
+      uint8_t n = reiniciosSinWifi < 250 ? reiniciosSinWifi + 1 : 250;
+      logEvento("WiFi: 10 min sin conexion (vez %u seguida), recalibro la radio y reinicio", n);
+      if (protoActual != PROTO_BGN && n >= REINICIOS_PARA_BGN) {
+        guardarProto(PROTO_BGN);   // tantas veces seguidas: quizas el modo guardado es el problema
         logEvento("WiFi: vuelvo a 802.11bgn");
+        n = 0;
       }
+      guardarReiniciosSinWifi(n);
       esp_phy_erase_cal_data_in_nvs();
       delay(100);
       ESP.restart();
@@ -1512,6 +1529,7 @@ void setup() {
     Preferences pr;
     pr.begin("wifi", true);
     uint8_t p = pr.getUChar("proto", PROTO_BGN);
+    reiniciosSinWifi = pr.getUChar("sinwifi", 0);
     pr.end();
     if (p == WIFI_PROTOCOL_11B || p == (WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G)) {
       esp_wifi_set_protocol(WIFI_IF_STA, p);

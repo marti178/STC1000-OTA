@@ -68,6 +68,7 @@
   TLS viejo: en realidad fue un timeout de lectura, -11).
 - v1.2.3: el modo de `PROTO` se guarda si queda estable; con 10 min sin WiFi vuelve a b/g/n.
 - v1.2.4: `LOG` en pedazos de 400 bytes, alimentando el watchdog y cortando al primer fallo (los de 1,5 KB trababan el loop: 3 reinicios por watchdog y los cortes "a los 45 s" de la noche del 21/11 fueron todos justo después de pedir un LOG). `LOG <bytes>`.
+- v1.2.5: el modo WiFi guardado ya no se abandona al primer reinicio por 10 min sin WiFi: vuelve a b/g/n recién tras 3 reinicios seguidos (contador en NVS `wifi/sinwifi`, vuelve a 0 al conectar el MQTT). Motivo (22-23/11): cortes largos por interferencia (sonda colgando cerca de la placa, luces dimerizadas 21:35-00:38, 12:55, 16:20) lo pasaban a b/g/n, que con ruido anda mucho peor que 11b y no levantaba hasta volver a mano a 11b. A/B del 22/11 (4x20 min): 11b 0,8-1,1 % de pérdida y RTT max 15-45 ms; b/g/n 1,2-3 %, RTT max 33-117 ms y un corte de MQTT. El celular usando WiFi al lado de la pecera hace perder 70-100 % de pings grandes (sin cortar MQTT). Pendiente: antena externa (notebook) y capacitor 470-1000 uF.
 - **Router: 2,4 GHz del canal 1 (6 vecinos) al 11, 20 MHz** (2026-11-21).
 - **Diagnóstico 220 V / acuario (2026-11-21):**
   - Con v1.1.9 a 220 V en la mesa no asociaba (AUTH_EXPIRE, 4WAY_HANDSHAKE_TIMEOUT); por USB
@@ -82,7 +83,7 @@
   - Hipótesis abiertas (segunda opinión): ruido del equipo del acuario (driver de luces, bomba)
     por aire o por la línea; armado que desafina la antena (cables, sonda en el agua); bobinas de
     los relés colgando del 5V alimentado al revés por el LDO.
-- **En el equipo: v1.2.4, instalado en el acuario, 11 dBm, 802.11b.** Noche del 21 al 22 en 802.11b: 11 h sin un corte del MQTT (01:42 a 12:47), ping 0,2-0,5 % de pérdida por hora. Los únicos cortes y reinicios fueron por pedir el LOG. El frío estuvo prendido toda la noche y la temperatura no bajó de 29 °C (revisar el equipo de frío). (Antes, v1.1.3 con 8,5 dBm:) Prueba de relés (2026-11-21 01:05-01:12):
+- **En el equipo: v1.2.5, instalado en el acuario, 11 dBm, 802.11b.** Noche del 21 al 22 en 802.11b: 11 h sin un corte del MQTT (01:42 a 12:47), ping 0,2-0,5 % de pérdida por hora. Los únicos cortes y reinicios fueron por pedir el LOG. El frío estuvo prendido toda la noche y la temperatura no bajó de 29 °C (revisar el equipo de frío). (Antes, v1.1.3 con 8,5 dBm:) Prueba de relés (2026-11-21 01:05-01:12):
   ~6 conmutaciones sin reinicios ni cortes del MQTT; el ping tiene cortes de 1 a 5 s (hasta 22 s)
   al conmutar. El OTA a 1.1.3 se hizo con un relé conmutando y volvió solo tras reiniciar.
 - Antes (v1.0.6, en banco): **en la LAN, publicando.** OTA automático verificado dos veces
