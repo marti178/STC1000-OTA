@@ -1117,7 +1117,7 @@ static void publicarLog(unsigned bytes) {
 
 // Prueba de potencia (comando TX)
 const float    TX_MIN_DBM  = 8.5f;    // con menos el router no escucha bien al ESP32
-const float    TX_MAX_DBM  = 20.0f;   // maximo del chip; 14-15 dBm anduvieron mejor que 13 (23/11 en el acuario)
+const float    TX_MAX_DBM  = 15.0f;   // 14-15 dBm andan mejor que 13; con 17 y 20 esta placa pierde el 100 % (23/11)
 const float    TX_SEGURO_DBM = 13.0f; // probado estable (23/11); a esto vuelve si con mas se queda sin WiFi
 const uint32_t TX_PRUEBA_MS = 2UL * 60 * 1000;
 bool     txEnPrueba = false;

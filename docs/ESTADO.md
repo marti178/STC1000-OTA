@@ -72,6 +72,7 @@
 - v1.2.6: `TX` hasta 15 dBm (antes 13), con red de seguridad: si con mas de 13 dBm se reinicia por 10 min sin WiFi, vuelve a 13 y lo guarda. Prueba del 23/11 en el acuario (11b, bloques alternados de 8 min): 8,5 dBm 12-64 % de pings chicos y 76-100 % de grandes perdidos (y un corte); 11 dBm 0-4 % chicos y 0-44 % grandes; 13 dBm 0-4 % chicos y 0-20 % grandes (casi siempre 0). El problema es la subida (ESP32 -> router): mas potencia ayuda, menos empeora.
   Segunda tanda (23/11 17:33-18:01, 13/14/15 alternados): pings grandes perdidos en promedio 13 dBm 12-15 %, 14 dBm 1-5 %, 15 dBm 1-7 %; chicos 0-4 % y ningun corte en todas. 15 dBm ya no da el "no conecta" del 21/11. Queda en 15 dBm (guardado).
 - v1.2.7: `TX` hasta 20 dBm (maximo del chip), con la misma red de seguridad a 13 dBm.
+- v1.2.8: `TX` vuelve a tope 15 dBm. Prueba del 23/11 19:08-19:22: 15 dBm 0 % chicos y 0-8 % grandes; 17 dBm y 20 dBm pierden el 100 % al instante (sin reinicio: no es la fuente, es la placa/antena con potencia alta) y la prueba vuelve sola a 15 a los 2 min. Queda en 15 dBm.
 - **Router: 2,4 GHz del canal 1 (6 vecinos) al 11, 20 MHz** (2026-11-21).
 - **Diagnóstico 220 V / acuario (2026-11-21):**
   - Con v1.1.9 a 220 V en la mesa no asociaba (AUTH_EXPIRE, 4WAY_HANDSHAKE_TIMEOUT); por USB
